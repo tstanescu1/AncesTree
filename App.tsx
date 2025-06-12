@@ -1,8 +1,7 @@
 import { ConvexProvider, ConvexReactClient } from "convex/react";
-import Constants from "expo-constants";
 import MainScreen from "./src/MainScreen";
 
-const convex = new ConvexReactClient(Constants.expoConfig?.extra?.CONVEX_URL);
+const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL);
 
 export default function App() {
   return (

@@ -7,6 +7,7 @@ export default defineSchema({
     commonNames: v.array(v.string()),
     wikiUrl: v.optional(v.string()),
     medicinalTags: v.array(v.string()),
+    traditionalUsage: v.optional(v.string()),
     imageUrl: v.optional(v.string()),
     createdAt: v.number()
   }).index("scientificName", ["scientificName"]),
