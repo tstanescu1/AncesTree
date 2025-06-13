@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, Image, ScrollView, Alert } from 'react-native';
 import { useAction, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
+import { useLocationHandler } from '../hooks/useLocationHandler';
 
 interface PlantCollectionViewProps {
     plants: any[] | undefined;
@@ -30,6 +31,9 @@ export default function PlantCollectionView({
     // Get standardized tags from backend
     const standardTags = useQuery(api.identifyPlant.getStandardMedicinalTags) || [];
     const standardizeExistingTags = useAction(api.identifyPlant.standardizeExistingTags);
+    
+    // Location handler for maps integration
+    const { openInMaps, formatDecimalCoordinates } = useLocationHandler();
 
     const handleStandardizeExistingTags = async () => {
         Alert.alert(
@@ -100,163 +104,75 @@ export default function PlantCollectionView({
                 )}
             </View>
 
-            {/* Enhanced Tag Filter Section */}
+            {/* Filter Properties */}
             <View style={{ 
+                width: '100%', 
+                maxWidth: 400, 
+                marginBottom: 16, 
                 backgroundColor: 'white', 
-                padding: 12, 
                 borderRadius: 12, 
-                marginBottom: 16,
+                padding: 12,
                 shadowColor: '#000',
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.1,
-                shadowRadius: 4,
-                elevation: 3,
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.05,
+                shadowRadius: 3,
+                elevation: 2,
+                borderWidth: 1,
+                borderColor: '#f0f0f0'
             }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#374151' }}>
-                        🏷️ Filter by Properties
-                    </Text>
-                    
-                    {selectedTags.length > 0 && (
-                        <TouchableOpacity
-                            style={{
-                                backgroundColor: '#dc2626',
-                                paddingHorizontal: 8,
-                                paddingVertical: 4,
-                                borderRadius: 6,
-                            }}
-                            onPress={() => setSelectedTags([])}
-                        >
-                            <Text style={{ color: 'white', fontSize: 10, fontWeight: '600' }}>
-                                Clear ({selectedTags.length})
-                            </Text>
-                        </TouchableOpacity>
-                    )}
-                </View>
-
-                {/* Display simple collection info */}
-                {getAllUniqueTags().length > 0 ? (
-                    <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
-                        Found {getAllUniqueTags().length} medicinal properties in your collection
-                    </Text>
-                ) : (
-                    <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
-                        No medicinal tags in your collection yet
-                    </Text>
-                )}
-
+                <Text style={{ 
+                    fontSize: 13, 
+                    fontWeight: '600', 
+                    color: '#374151', 
+                    marginBottom: 8,
+                    letterSpacing: 0.3
+                }}>
+                    Filter by Medicinal Properties
+                </Text>
                 <ScrollView 
                     horizontal 
-                    showsHorizontalScrollIndicator={false} 
-                    style={{ marginVertical: 4, height: 40 }}
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ 
+                        flexDirection: 'row', 
+                        gap: 8,
+                        paddingRight: 4
+                    }}
                 >
-                    <View style={{ flexDirection: 'row', gap: 6 }}>
-                        {/* Only show tags that actually exist in user's collection */}
-                        {getAllUniqueTags()
-                            .sort((a, b) => {
-                                // Sort by plant count (descending), then alphabetically
-                                const countA = plants?.filter(plant => plant.medicinalTags?.includes(a)).length || 0;
-                                const countB = plants?.filter(plant => plant.medicinalTags?.includes(b)).length || 0;
-                                if (countA !== countB) return countB - countA;
-                                return a.localeCompare(b);
-                            })
-                            .map((tag) => {
-                                const isSelected = selectedTags.includes(tag);
-                                const isStandardTag = standardTags.includes(tag);
-                                const plantCount = plants?.filter(plant => 
-                                    plant.medicinalTags?.includes(tag)
-                                ).length || 0;
-                                
-                                return (
-                                    <TouchableOpacity
-                                        key={tag}
-                                        style={{
-                                            backgroundColor: isSelected 
-                                                ? '#059669' 
-                                                : isStandardTag 
-                                                    ? '#f0fdf4' 
-                                                    : '#fef3c7',
-                                            paddingHorizontal: 8,
-                                            paddingVertical: 4,
-                                            borderRadius: 12,
-                                            borderWidth: 1,
-                                            borderColor: isSelected 
-                                                ? '#047857' 
-                                                : isStandardTag 
-                                                    ? '#bbf7d0' 
-                                                    : '#fbbf24',
-                                            minWidth: 50,
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            height: 32,
-                                        }}
-                                        onPress={() => {
-                                            if (isSelected) {
-                                                setSelectedTags(selectedTags.filter(t => t !== tag));
-                                            } else {
-                                                setSelectedTags([...selectedTags, tag]);
-                                            }
-                                        }}
-                                    >
-                                        <Text style={{
-                                            fontSize: 11,
-                                            fontWeight: '600',
-                                            color: isSelected 
-                                                ? 'white' 
-                                                : isStandardTag 
-                                                    ? '#059669' 
-                                                    : '#d97706',
-                                            textAlign: 'center',
-                                            lineHeight: 12,
-                                        }}>
-                                            {tag}
-                                        </Text>
-                                        <Text style={{
-                                            fontSize: 9,
-                                            color: isSelected 
-                                                ? '#bbf7d0' 
-                                                : isStandardTag 
-                                                    ? '#6b7280' 
-                                                    : '#92400e',
-                                            marginTop: 1,
-                                            lineHeight: 10,
-                                        }}>
-                                            {plantCount}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                    </View>
+                    {getAllUniqueTags().map((tag) => (
+                        <TouchableOpacity
+                            key={tag}
+                            onPress={() => {
+                                if (selectedTags.includes(tag)) {
+                                    setSelectedTags(selectedTags.filter(t => t !== tag));
+                                } else {
+                                    setSelectedTags([...selectedTags, tag]);
+                                }
+                            }}
+                            style={{
+                                paddingHorizontal: 12,
+                                paddingVertical: 6,
+                                borderRadius: 20,
+                                backgroundColor: selectedTags.includes(tag) ? '#059669' : '#f8fafc',
+                                borderWidth: 1,
+                                borderColor: selectedTags.includes(tag) ? '#059669' : '#e2e8f0',
+                                shadowColor: selectedTags.includes(tag) ? '#059669' : 'transparent',
+                                shadowOffset: { width: 0, height: 1 },
+                                shadowOpacity: selectedTags.includes(tag) ? 0.2 : 0,
+                                shadowRadius: 2,
+                                elevation: selectedTags.includes(tag) ? 2 : 0
+                            }}
+                        >
+                            <Text style={{ 
+                                fontSize: 12, 
+                                color: selectedTags.includes(tag) ? 'white' : '#64748b',
+                                fontWeight: selectedTags.includes(tag) ? '600' : '500',
+                                letterSpacing: 0.2
+                            }}>
+                                {tag}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
                 </ScrollView>
-
-                {/* Show legend only if there are tags */}
-                {getAllUniqueTags().length > 0 && (
-                    <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 8, gap: 16 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#bbf7d0' }} />
-                            <Text style={{ fontSize: 10, color: '#6b7280' }}>Standard</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#fbbf24' }} />
-                            <Text style={{ fontSize: 10, color: '#6b7280' }}>Custom</Text>
-                        </View>
-                    </View>
-                )}
-
-                {/* Show helpful message if no plants with medicinal tags */}
-                {getAllUniqueTags().length === 0 && plants && plants.length > 0 && (
-                    <View style={{ 
-                        backgroundColor: '#f0fdf4', 
-                        padding: 8, 
-                        borderRadius: 6, 
-                        marginTop: 4,
-                        alignItems: 'center'
-                    }}>
-                        <Text style={{ fontSize: 11, color: '#059669', textAlign: 'center' }}>
-                            💡 Identify more plants to see medicinal property filters
-                        </Text>
-                    </View>
-                )}
             </View>
 
             {/* Admin Mode Warning */}
@@ -361,6 +277,137 @@ export default function PlantCollectionView({
                                 <Text selectable style={{ fontStyle: 'italic', color: '#6b7280', fontSize: 14 }}>
                                     {plantItem.scientificName}
                                 </Text>
+
+                                {/* Location Preview - Show if any sightings have location data */}
+                                {plantItem.allSightings && plantItem.allSightings.some((s: any) => s.latitude && s.longitude) && (
+                                    <View style={{ marginTop: 8, marginBottom: 8 }}>
+                                        {(() => {
+                                            // Get unique locations from sightings
+                                            const locationsMap = new Map();
+                                            plantItem.allSightings.forEach((sighting: any) => {
+                                                if (sighting.latitude && sighting.longitude) {
+                                                    const key = `${sighting.latitude.toFixed(4)},${sighting.longitude.toFixed(4)}`;
+                                                    if (!locationsMap.has(key)) {
+                                                        locationsMap.set(key, {
+                                                            latitude: sighting.latitude,
+                                                            longitude: sighting.longitude,
+                                                            address: sighting.address,
+                                                            timestamp: sighting.locationTimestamp || sighting.identifiedAt,
+                                                            count: 1
+                                                        });
+                                                    } else {
+                                                        locationsMap.get(key).count++;
+                                                    }
+                                                }
+                                            });
+                                            
+                                            const uniqueLocations = Array.from(locationsMap.values());
+                                            const mostRecentLocation = uniqueLocations.sort((a, b) => b.timestamp - a.timestamp)[0];
+                                            
+                                            return (
+                                                <View>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                                                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534' }}>
+                                                            📍 Locations ({uniqueLocations.length})
+                                                        </Text>
+                                                        {uniqueLocations.length > 1 && (
+                                                            <Text style={{ fontSize: 10, color: '#6b7280' }}>
+                                                                Multiple spots found
+                                                            </Text>
+                                                        )}
+                                                    </View>
+                                                    
+                                                    {/* Compact location display */}
+                                                    <TouchableOpacity
+                                                        style={{
+                                                            backgroundColor: '#f0fdf4',
+                                                            padding: 10,
+                                                            borderRadius: 8,
+                                                            borderWidth: 1,
+                                                            borderColor: '#bbf7d0',
+                                                            flexDirection: 'row',
+                                                            alignItems: 'center',
+                                                            gap: 10
+                                                        }}
+                                                        onPress={() => {
+                                                            openInMaps(
+                                                                mostRecentLocation.latitude, 
+                                                                mostRecentLocation.longitude, 
+                                                                plantItem.commonNames?.[0] || plantItem.scientificName
+                                                            );
+                                                        }}
+                                                        activeOpacity={0.7}
+                                                    >
+                                                        {/* Map icon */}
+                                                        <View style={{
+                                                            backgroundColor: '#059669',
+                                                            width: 32,
+                                                            height: 32,
+                                                            borderRadius: 6,
+                                                            justifyContent: 'center',
+                                                            alignItems: 'center'
+                                                        }}>
+                                                            <Text style={{ fontSize: 16 }}>🗺️</Text>
+                                                        </View>
+                                                        
+                                                        {/* Location info */}
+                                                        <View style={{ flex: 1 }}>
+                                                            {mostRecentLocation.address && (
+                                                                <Text style={{ fontSize: 11, color: '#374151', marginBottom: 2 }} numberOfLines={1}>
+                                                                    {mostRecentLocation.address}
+                                                                </Text>
+                                                            )}
+                                                            <Text style={{ fontSize: 10, color: '#6b7280', fontFamily: 'monospace' }}>
+                                                                {formatDecimalCoordinates(mostRecentLocation.latitude, mostRecentLocation.longitude)}
+                                                            </Text>
+                                                            {uniqueLocations.length > 1 && (
+                                                                <Text style={{ fontSize: 9, color: '#059669', fontWeight: '600', marginTop: 2 }}>
+                                                                    +{uniqueLocations.length - 1} more location{uniqueLocations.length > 2 ? 's' : ''}
+                                                                </Text>
+                                                            )}
+                                                        </View>
+                                                        
+                                                        {/* Tap indicator */}
+                                                        <View style={{
+                                                            backgroundColor: '#e5e7eb',
+                                                            paddingHorizontal: 6,
+                                                            paddingVertical: 2,
+                                                            borderRadius: 4
+                                                        }}>
+                                                            <Text style={{ fontSize: 9, color: '#6b7280', fontWeight: '600' }}>
+                                                                TAP
+                                                            </Text>
+                                                        </View>
+                                                    </TouchableOpacity>
+                                                    
+                                                    {uniqueLocations.length > 1 && (
+                                                        <TouchableOpacity
+                                                            style={{
+                                                                marginTop: 6,
+                                                                backgroundColor: '#f8fafc',
+                                                                paddingHorizontal: 8,
+                                                                paddingVertical: 4,
+                                                                borderRadius: 4,
+                                                                alignSelf: 'center',
+                                                                borderWidth: 1,
+                                                                borderColor: '#e2e8f0'
+                                                            }}
+                                                            onPress={() => {
+                                                                setSelectedPlantId(plantItem._id);
+                                                                setCurrentView('detail');
+                                                            }}
+                                                        >
+                                                            <Text style={{ fontSize: 10, color: '#059669', fontWeight: '600' }}>
+                                                                🗺️ View All {uniqueLocations.length} Locations
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    )}
+                                                </View>
+                                            );
+                                        })()}
+                                    </View>
+                                )}
+
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
                                     <View style={{ flex: 1 }}>
                                         {plantItem.medicinalTags && plantItem.medicinalTags.length > 0 ? (

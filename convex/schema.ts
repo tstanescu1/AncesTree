@@ -19,12 +19,18 @@ export default defineSchema({
     toxicity: v.optional(v.string()),
     otherDetails: v.optional(v.string()),
     activeCompounds: v.optional(v.array(v.string())),
+    pests: v.optional(v.array(v.string())),
   }).index("scientificName", ["scientificName"]),
 
   sightings: defineTable({
     plantId: v.id("plants"),
     photoUri: v.string(),
-    identifiedAt: v.number()
+    identifiedAt: v.number(),
+    latitude: v.optional(v.number()),
+    longitude: v.optional(v.number()),
+    address: v.optional(v.string()),
+    accuracy: v.optional(v.number()),
+    locationTimestamp: v.optional(v.number()),
   }).index("plantId", ["plantId"]),
 
   plant_feedback: defineTable({

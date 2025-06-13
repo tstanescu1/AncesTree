@@ -212,13 +212,12 @@ export default function LocationMapPreview({
                     <TouchableOpacity 
                         onPress={() => copyCoordinates(
                             formatDecimalCoordinates(location.latitude, location.longitude),
-                            'Decimal'
+                            'Coordinates'
                         )}
                         style={{
                             backgroundColor: '#f3f4f6',
                             padding: 6,
                             borderRadius: 4,
-                            marginBottom: 4,
                             borderWidth: 1,
                             borderColor: '#e5e7eb'
                         }}
@@ -226,28 +225,6 @@ export default function LocationMapPreview({
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                             <Text style={{ fontSize: 12, color: '#374151', fontFamily: 'monospace' }}>
                                 {formatDecimalCoordinates(location.latitude, location.longitude)}
-                            </Text>
-                            <Text style={{ fontSize: 10, color: '#6b7280' }}>📋 Tap to copy</Text>
-                        </View>
-                    </TouchableOpacity>
-
-                    {/* DMS coordinates */}
-                    <TouchableOpacity 
-                        onPress={() => copyCoordinates(
-                            formatCoordinates(location.latitude, location.longitude),
-                            'DMS'
-                        )}
-                        style={{
-                            backgroundColor: '#f3f4f6',
-                            padding: 6,
-                            borderRadius: 4,
-                            borderWidth: 1,
-                            borderColor: '#e5e7eb'
-                        }}
-                    >
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text style={{ fontSize: 11, color: '#374151', fontFamily: 'monospace' }}>
-                                {formatCoordinates(location.latitude, location.longitude)}
                             </Text>
                             <Text style={{ fontSize: 10, color: '#6b7280' }}>📋 Tap to copy</Text>
                         </View>

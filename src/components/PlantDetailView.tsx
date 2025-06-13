@@ -3,12 +3,16 @@ import { View, Text, TouchableOpacity, ActivityIndicator, Image, ScrollView, Tex
 import Markdown from 'react-native-markdown-display';
 import { Id } from "../../convex/_generated/dataModel";
 import LocationMapPreview from './LocationMapPreview';
+import { useLocationHandler } from '../hooks/useLocationHandler';
 
 interface PlantDetailViewProps {
     selectedPlantId: string | null;
     plantDetail: any;
     plantFeedback?: any[];
     loading: boolean;
+    deletingPlant: boolean;
+    deletingSighting: boolean;
+    settingDefaultPhoto: boolean;
     isEditingTraditionalUsage: boolean;
     editedTraditionalUsage: string;
     isEditingTags: boolean;
@@ -33,6 +37,7 @@ interface PlantDetailViewProps {
     addPhotoToPlant: () => void;
     handleDeleteSighting: (sightingId: any, photoIndex: number) => void;
     handleSetDefaultPhoto: (sightingId: any) => void;
+    handleSetDefaultDatabaseImage?: (imageUrl: string, plantId: string) => void;
     updatePlantFeedback: (args: { feedbackId: Id<"plant_feedback">, feedback: string }) => Promise<any>;
     addPlantFeedback: (args: { plantId: Id<"plants">, scientificName: string, feedback: string, timestamp: number }) => Promise<any>;
     refreshPlantData: () => Promise<void>;
@@ -43,6 +48,9 @@ export default function PlantDetailView({
     plantDetail,
     plantFeedback,
     loading,
+    deletingPlant,
+    deletingSighting,
+    settingDefaultPhoto,
     isEditingTraditionalUsage,
     editedTraditionalUsage,
     isEditingTags,
@@ -67,10 +75,14 @@ export default function PlantDetailView({
     addPhotoToPlant,
     handleDeleteSighting,
     handleSetDefaultPhoto,
+    handleSetDefaultDatabaseImage,
     updatePlantFeedback,
     addPlantFeedback,
     refreshPlantData
 }: PlantDetailViewProps) {
+    // Location handler hook
+    const { openInMaps, currentLocation, getDistanceFromCurrentLocation } = useLocationHandler();
+    
     // State for editing feedback
     const [editingFeedbackId, setEditingFeedbackId] = useState<string | null>(null);
     const [editingFeedbackText, setEditingFeedbackText] = useState('');
@@ -130,6 +142,27 @@ export default function PlantDetailView({
         );
     }
 
+    // --- Common in Area Logic ---
+    let isCommonNearby = false;
+    if (currentLocation && plantDetail.allSightings) {
+        isCommonNearby = plantDetail.allSightings.some((s: any) => {
+            if (typeof s.latitude === 'number' && typeof s.longitude === 'number') {
+                // Haversine distance in km
+                const R = 6371;
+                const dLat = (s.latitude - currentLocation.latitude) * Math.PI / 180;
+                const dLng = (s.longitude - currentLocation.longitude) * Math.PI / 180;
+                const a =
+                    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                    Math.cos(currentLocation.latitude * Math.PI / 180) * Math.cos(s.latitude * Math.PI / 180) *
+                    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                const distance = R * c;
+                return distance <= 50; // 50km radius
+            }
+            return false;
+        });
+    }
+
     return (
         <>
             {/* Back Button */}
@@ -146,51 +179,174 @@ export default function PlantDetailView({
             
             {plantDetail && !('error' in plantDetail) && (
                 <View style={{ width: '100%', maxWidth: 400 }}>
-                    {/* Reference Image - Show user's photo as the primary reference */}
-                    {plantDetail.userPhotos && plantDetail.userPhotos.length > 0 && (
-                        <View style={{ marginBottom: 16 }}>
-                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>📸 Your Reference Photo</Text>
-                            <TouchableOpacity onPress={() => {
-                                if (plantDetail.userPhotos[0]) setZoomedImage(plantDetail.userPhotos[0]);
-                            }}>
-                                <View style={{ position: 'relative' }}>
-                                    <Image 
-                                        source={{ uri: plantDetail.userPhotos[0] }} 
-                                        style={{ 
-                                            width: '100%', 
-                                            height: 192, 
-                                            borderRadius: 8,
-                                            backgroundColor: '#f3f4f6'
-                                        }} 
-                                        resizeMode="cover"
-                                    />
-                                    
-                                    {/* Default photo badge */}
-                                    <View style={{
-                                        position: 'absolute',
-                                        top: 8,
-                                        right: 8,
-                                        backgroundColor: 'rgba(16, 185, 129, 0.95)',
-                                        paddingHorizontal: 8,
-                                        paddingVertical: 4,
-                                        borderRadius: 6,
-                                        shadowColor: '#000',
-                                        shadowOffset: { width: 0, height: 1 },
-                                        shadowOpacity: 0.2,
-                                        shadowRadius: 2,
-                                        elevation: 2,
-                                    }}>
-                                        <Text style={{ color: 'white', fontSize: 11, fontWeight: '700' }}>
-                                            ⭐ Default
-                                        </Text>
-                                    </View>
+                    {/* Reference Image - Show the actual default photo (user or database) */}
+                    {(() => {
+                        // Determine what the primary reference photo should be
+                        const hasUserPhotos = plantDetail.userPhotos && plantDetail.userPhotos.length > 0;
+                        const hasDatabaseImage = plantDetail.imageUrl;
+                        const hasValidSimilarImages = plantDetail.similar_images && plantDetail.similar_images.length > 0;
+                        
+                        // Debug logging
+                        console.log('🔍 Reference photo detection:');
+                        console.log('📸 hasUserPhotos:', hasUserPhotos);
+                        console.log('🗂️ hasDatabaseImage:', hasDatabaseImage);
+                        console.log('📊 hasValidSimilarImages:', hasValidSimilarImages);
+                        console.log('🖼️ imageUrl:', plantDetail.imageUrl);
+                        console.log('🗂️ similar_images[0]:', plantDetail.similar_images?.[0]);
+                        console.log('🗂️ similar_images length:', plantDetail.similar_images?.length);
+                        
+                        // If imageUrl exists and matches the first similar_image, it was set as default
+                        const isDatabaseImageDefault = hasDatabaseImage && hasValidSimilarImages && 
+                                                     plantDetail.imageUrl === plantDetail.similar_images[0];
+                        
+                        console.log('✅ isDatabaseImageDefault:', isDatabaseImageDefault);
+                        
+                        // Show database image as reference if it was explicitly set as default
+                        if (isDatabaseImageDefault) {
+                            console.log('🖼️ Showing database image as reference photo');
+                            return (
+                                <View style={{ marginBottom: 16 }}>
+                                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>📸 Reference Photo</Text>
+                                    <TouchableOpacity onPress={() => setZoomedImage(plantDetail.imageUrl)}>
+                                        <View style={{ position: 'relative' }}>
+                                            <Image 
+                                                source={{ uri: plantDetail.imageUrl }} 
+                                                style={{ 
+                                                    width: '100%', 
+                                                    height: 192, 
+                                                    borderRadius: 8,
+                                                    backgroundColor: '#f3f4f6'
+                                                }} 
+                                                resizeMode="cover"
+                                            />
+                                            
+                                            {/* Default photo badge */}
+                                            <View style={{
+                                                position: 'absolute',
+                                                top: 8,
+                                                right: 8,
+                                                backgroundColor: 'rgba(16, 185, 129, 0.95)',
+                                                paddingHorizontal: 8,
+                                                paddingVertical: 4,
+                                                borderRadius: 6,
+                                                shadowColor: '#000',
+                                                shadowOffset: { width: 0, height: 1 },
+                                                shadowOpacity: 0.2,
+                                                shadowRadius: 2,
+                                                elevation: 2,
+                                            }}>
+                                                <Text style={{ color: 'white', fontSize: 11, fontWeight: '700' }}>
+                                                    ⭐ Default
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    </TouchableOpacity>
+                                    <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                                        Database reference photo set as default
+                                    </Text>
                                 </View>
-                            </TouchableOpacity>
-                            <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                                The main reference photo for this plant species
-                            </Text>
-                        </View>
-                    )}
+                            );
+                        }
+                        
+                        // Show user photo as reference if we have user photos and no database default
+                        if (hasUserPhotos) {
+                            console.log('📸 Showing user photo as reference photo');
+                            return (
+                                <View style={{ marginBottom: 16 }}>
+                                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>📸 Your Reference Photo</Text>
+                                    <TouchableOpacity onPress={() => {
+                                        if (plantDetail.userPhotos[0]) setZoomedImage(plantDetail.userPhotos[0]);
+                                    }}>
+                                        <View style={{ position: 'relative' }}>
+                                            <Image 
+                                                source={{ uri: plantDetail.userPhotos[0] }} 
+                                                style={{ 
+                                                    width: '100%', 
+                                                    height: 192, 
+                                                    borderRadius: 8,
+                                                    backgroundColor: '#f3f4f6'
+                                                }} 
+                                                resizeMode="cover"
+                                            />
+                                            
+                                            {/* Default photo badge */}
+                                            <View style={{
+                                                position: 'absolute',
+                                                top: 8,
+                                                right: 8,
+                                                backgroundColor: 'rgba(16, 185, 129, 0.95)',
+                                                paddingHorizontal: 8,
+                                                paddingVertical: 4,
+                                                borderRadius: 6,
+                                                shadowColor: '#000',
+                                                shadowOffset: { width: 0, height: 1 },
+                                                shadowOpacity: 0.2,
+                                                shadowRadius: 2,
+                                                elevation: 2,
+                                            }}>
+                                                <Text style={{ color: 'white', fontSize: 11, fontWeight: '700' }}>
+                                                    ⭐ Default
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    </TouchableOpacity>
+                                    <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                                        Your main reference photo for this plant species
+                                    </Text>
+                                </View>
+                            );
+                        }
+                        
+                        // Fallback to database image if no user photos
+                        if (hasDatabaseImage) {
+                            console.log('🗂️ Showing fallback database image as reference photo');
+                            return (
+                                <View style={{ marginBottom: 16 }}>
+                                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>📸 Reference Photo</Text>
+                                    <TouchableOpacity onPress={() => setZoomedImage(plantDetail.imageUrl)}>
+                                        <View style={{ position: 'relative' }}>
+                                            <Image 
+                                                source={{ uri: plantDetail.imageUrl }} 
+                                                style={{ 
+                                                    width: '100%', 
+                                                    height: 192, 
+                                                    borderRadius: 8,
+                                                    backgroundColor: '#f3f4f6'
+                                                }} 
+                                                resizeMode="cover"
+                                            />
+                                            
+                                            {/* Default photo badge */}
+                                            <View style={{
+                                                position: 'absolute',
+                                                top: 8,
+                                                right: 8,
+                                                backgroundColor: 'rgba(16, 185, 129, 0.95)',
+                                                paddingHorizontal: 8,
+                                                paddingVertical: 4,
+                                                borderRadius: 6,
+                                                shadowColor: '#000',
+                                                shadowOffset: { width: 0, height: 1 },
+                                                shadowOpacity: 0.2,
+                                                shadowRadius: 2,
+                                                elevation: 2,
+                                            }}>
+                                                <Text style={{ color: 'white', fontSize: 11, fontWeight: '700' }}>
+                                                    ⭐ Default
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    </TouchableOpacity>
+                                    <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                                        Database reference photo for this plant species
+                                    </Text>
+                                </View>
+                            );
+                        }
+                        
+                        console.log('❌ No reference photo available');
+                        return null;
+                    })()}
 
                     {/* Comprehensive Photo Gallery - All images in one place */}
                     {((plantDetail.userPhotos && plantDetail.userPhotos.length > 1) || (plantDetail.similar_images && plantDetail.similar_images.length > 0) || true) && (
@@ -200,14 +356,30 @@ export default function PlantDetailView({
                             </Text>
                             <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
                                 {(() => {
-                                    const userPhotoCount = plantDetail.userPhotos ? plantDetail.userPhotos.length - 1 : 0; // Subtract 1 for reference photo
+                                    // Determine if database image is default to calculate correct counts
+                                    const hasUserPhotos = plantDetail.userPhotos && plantDetail.userPhotos.length > 0;
+                                    const hasDatabaseImage = plantDetail.imageUrl;
+                                    const hasValidSimilarImages = plantDetail.similar_images && plantDetail.similar_images.length > 0;
+                                    const isDatabaseImageDefault = hasDatabaseImage && hasValidSimilarImages && 
+                                                                 plantDetail.imageUrl === plantDetail.similar_images[0];
+                                    
+                                    // Count photos correctly based on what's shown as reference
+                                    const userPhotoCount = isDatabaseImageDefault 
+                                        ? (plantDetail.userPhotos ? plantDetail.userPhotos.length : 0)  // Show all user photos
+                                        : (plantDetail.userPhotos ? plantDetail.userPhotos.length - 1 : 0); // Skip reference photo
+                                    
                                     const databasePhotoCount = plantDetail.similar_images ? plantDetail.similar_images.length : 0;
                                     const totalCount = userPhotoCount + databasePhotoCount;
+                                    
+                                    console.log(`📊 Photo count calculation: isDatabaseImageDefault=${isDatabaseImageDefault}`);
+                                    console.log(`📊 User photos in gallery: ${userPhotoCount}`);
+                                    console.log(`📊 Database photos: ${databasePhotoCount}`);
+                                    console.log(`📊 Total in gallery: ${totalCount}`);
                                     
                                     if (userPhotoCount > 0 && databasePhotoCount > 0) {
                                         return `${userPhotoCount} your photos • ${databasePhotoCount} database images • ${totalCount} total`;
                                     } else if (userPhotoCount > 0) {
-                                        return `${userPhotoCount} additional photos of your plant`;
+                                        return `${userPhotoCount} ${isDatabaseImageDefault ? 'photos of your plant' : 'additional photos of your plant'}`;
                                     } else if (databasePhotoCount > 0) {
                                         return `${databasePhotoCount} reference images from community database`;
                                     }
@@ -222,47 +394,84 @@ export default function PlantDetailView({
                                             width: 120,
                                             height: 120,
                                             borderRadius: 8,
-                                            backgroundColor: '#f0fdf4',
+                                            backgroundColor: loading ? '#f3f4f6' : '#f0fdf4',
                                             borderWidth: 2,
-                                            borderColor: '#bbf7d0',
+                                            borderColor: loading ? '#d1d5db' : '#bbf7d0',
                                             borderStyle: 'dashed',
                                             justifyContent: 'center',
                                             alignItems: 'center',
-                                            position: 'relative'
+                                            position: 'relative',
+                                            opacity: loading ? 0.7 : 1
                                         }}
                                         onPress={addPhotoToPlant}
                                         disabled={loading}
                                         activeOpacity={0.7}
                                     >
-                                        <Text style={{ fontSize: 24, marginBottom: 4 }}>📸</Text>
-                                        <Text style={{ 
-                                            fontSize: 11, 
-                                            fontWeight: '600', 
-                                            color: loading ? '#9ca3af' : '#059669',
-                                            textAlign: 'center',
-                                            paddingHorizontal: 8
-                                        }}>
-                                            {loading ? 'Adding...' : 'Add Photo'}
-                                        </Text>
-                                        
-                                        {/* Pulse animation hint */}
-                                        {!loading && (
-                                            <View style={{
-                                                position: 'absolute',
-                                                top: 8,
-                                                right: 8,
-                                                width: 8,
-                                                height: 8,
-                                                borderRadius: 4,
-                                                backgroundColor: '#10b981'
-                                            }} />
+                                        {loading ? (
+                                            <>
+                                                <ActivityIndicator size="small" color="#059669" style={{ marginBottom: 4 }} />
+                                                <Text style={{ 
+                                                    fontSize: 11, 
+                                                    fontWeight: '600', 
+                                                    color: '#059669',
+                                                    textAlign: 'center',
+                                                    paddingHorizontal: 8
+                                                }}>
+                                                    Adding...
+                                                </Text>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Text style={{ fontSize: 24, marginBottom: 4 }}>📸</Text>
+                                                <Text style={{ 
+                                                    fontSize: 11, 
+                                                    fontWeight: '600', 
+                                                    color: '#059669',
+                                                    textAlign: 'center',
+                                                    paddingHorizontal: 8
+                                                }}>
+                                                    Add Photo
+                                                </Text>
+                                                
+                                                {/* Pulse animation hint */}
+                                                <View style={{
+                                                    position: 'absolute',
+                                                    top: 8,
+                                                    right: 8,
+                                                    width: 8,
+                                                    height: 8,
+                                                    borderRadius: 4,
+                                                    backgroundColor: '#10b981'
+                                                }} />
+                                            </>
                                         )}
                                     </TouchableOpacity>
 
-                                    {/* User's additional photos (excluding the reference photo) */}
-                                    {plantDetail.userPhotos && plantDetail.userPhotos.length > 1 && 
-                                        plantDetail.userPhotos.slice(1).map((photo: string, index: number) => {
-                                            const actualIndex = index + 1; // Adjust for deletion since we skip first photo
+                                    {/* User's photos in gallery */}
+                                    {plantDetail.userPhotos && plantDetail.userPhotos.length > 0 && (() => {
+                                        // Determine if we should show all user photos or skip the first one
+                                        const hasUserPhotos = plantDetail.userPhotos && plantDetail.userPhotos.length > 0;
+                                        const hasDatabaseImage = plantDetail.imageUrl;
+                                        const hasValidSimilarImages = plantDetail.similar_images && plantDetail.similar_images.length > 0;
+                                        const isDatabaseImageDefault = hasDatabaseImage && hasValidSimilarImages && 
+                                                                     plantDetail.imageUrl === plantDetail.similar_images[0];
+                                        
+                                        // If database image is default, show ALL user photos
+                                        // If user photo is default, skip the first user photo (since it's shown as reference)
+                                        const userPhotosToShow = isDatabaseImageDefault ? plantDetail.userPhotos : plantDetail.userPhotos.slice(1);
+                                        const startIndex = isDatabaseImageDefault ? 0 : 1;
+                                        
+                                        console.log(`📸 Gallery logic: isDatabaseImageDefault=${isDatabaseImageDefault}`);
+                                        console.log(`📸 Total user photos: ${plantDetail.userPhotos.length}`);
+                                        console.log(`📸 Photos to show in gallery: ${userPhotosToShow.length}`);
+                                        console.log(`📸 Starting index: ${startIndex}`);
+                                        
+                                        return userPhotosToShow.map((photo: string, index: number) => {
+                                            const actualIndex = startIndex + index; // Adjust for proper sighting mapping
+                                            
+                                            // Debug logging for user photos
+                                            console.log(`📸 User photo ${actualIndex}: ${photo.substring(0, 50)}...`);
+                                            console.log(`🔍 Corresponding sighting: ${plantDetail.allSightings?.[actualIndex]?._id}`);
                                             
                                             return (
                                                 <View 
@@ -272,6 +481,9 @@ export default function PlantDetailView({
                                                     <TouchableOpacity 
                                                         onPress={() => setZoomedImage(photo)}
                                                         onLongPress={() => {
+                                                            // Disable long press during delete operations
+                                                            if (deletingSighting || settingDefaultPhoto) return;
+                                                            
                                                             Alert.alert(
                                                                 "Photo Options",
                                                                 "Choose an action for this photo:",
@@ -280,22 +492,14 @@ export default function PlantDetailView({
                                                                     {
                                                                         text: "🖼️ Set as Default",
                                                                         onPress: () => {
-                                                                            Alert.alert(
-                                                                                "Set Default Photo",
-                                                                                "Make this the main reference photo for this plant?",
-                                                                                [
-                                                                                    { text: "Cancel", style: "cancel" },
-                                                                                    {
-                                                                                        text: "Set Default",
-                                                                                        onPress: () => {
-                                                                                            const sighting = plantDetail.allSightings?.[actualIndex];
-                                                                                            if (sighting) {
-                                                                                                handleSetDefaultPhoto(sighting._id);
-                                                                                            }
-                                                                                        }
-                                                                                    }
-                                                                                ]
-                                                                            );
+                                                                            const sighting = plantDetail.allSightings?.[actualIndex];
+                                                                            if (sighting) {
+                                                                                console.log(`🖼️ Setting user photo as default: sighting ${sighting._id}`);
+                                                                                handleSetDefaultPhoto(sighting._id);
+                                                                            } else {
+                                                                                console.error(`❌ Could not find sighting for photo ${actualIndex}`);
+                                                                                Alert.alert('Error', 'Could not find associated photo data');
+                                                                            }
                                                                         }
                                                                     },
                                                                     {
@@ -313,7 +517,11 @@ export default function PlantDetailView({
                                                                                         onPress: () => {
                                                                                             const sighting = plantDetail.allSightings?.[actualIndex];
                                                                                             if (sighting) {
+                                                                                                console.log(`🗑️ Deleting user photo: sighting ${sighting._id}`);
                                                                                                 handleDeleteSighting(sighting._id, actualIndex);
+                                                                                            } else {
+                                                                                                console.error(`❌ Could not find sighting for photo ${actualIndex}`);
+                                                                                                Alert.alert('Error', 'Could not find associated photo data');
                                                                                             }
                                                                                         }
                                                                                     }
@@ -326,9 +534,11 @@ export default function PlantDetailView({
                                                         }}
                                                         style={{
                                                             borderRadius: 8,
-                                                            overflow: 'hidden'
+                                                            overflow: 'hidden',
+                                                            opacity: (deletingSighting || settingDefaultPhoto) ? 0.5 : 1
                                                         }}
                                                         activeOpacity={0.8}
+                                                        disabled={deletingSighting || settingDefaultPhoto}
                                                     >
                                                         <Image 
                                                             source={{ uri: photo }} 
@@ -372,8 +582,8 @@ export default function PlantDetailView({
                                                     </TouchableOpacity>
                                                 </View>
                                             );
-                                        })
-                                    }
+                                        });
+                                    })()}
                                     
                                     {/* Database images */}
                                     {plantDetail.similar_images && plantDetail.similar_images.map((imageUrl: string, index: number) => (
@@ -389,6 +599,12 @@ export default function PlantDetailView({
                                                         {
                                                             text: "🔍 View Larger",
                                                             onPress: () => setZoomedImage(imageUrl)
+                                                        },
+                                                        {
+                                                            text: "🖼️ Set as Default",
+                                                            onPress: () => {
+                                                                handleSetDefaultDatabaseImage && handleSetDefaultDatabaseImage(imageUrl, plantDetail._id);
+                                                            }
                                                         },
                                                         {
                                                             text: "📋 Copy Image URL",
@@ -488,15 +704,247 @@ export default function PlantDetailView({
                         </View>
                     )}
                     
-                    {/* Location Information */}
-                    {plantDetail.location && (
-                        <LocationMapPreview
-                            location={plantDetail.location}
-                            plantName={plantDetail.commonNames?.[0] || plantDetail.scientificName}
-                            style={{ marginBottom: 16 }}
-                        />
-                    )}
+                    {/* Enhanced Location Information */}
+                    {(() => {
+                        // Enhanced debug logging
+                        // console.log('🔍 PlantDetail allSightings:', plantDetail.allSightings);
+                        // console.log('🔍 First sighting data:', plantDetail.allSightings?.[0]);
+                        
+                        // Check for location data with more detailed logging
+                        const sightingsWithLocation = plantDetail.allSightings?.filter((s: any) => {
+                            const hasLocation = s.latitude && s.longitude && 
+                                              typeof s.latitude === 'number' && 
+                                              typeof s.longitude === 'number';
+                            if (hasLocation) {
+                                console.log('✅ Sighting with location found:', {
+                                    latitude: s.latitude,
+                                    longitude: s.longitude,
+                                    address: s.address,
+                                    timestamp: s.locationTimestamp || s.identifiedAt
+                                });
+                            }
+                            return hasLocation;
+                        }) || [];
+                        
+                        console.log('📍 Total sightings with location:', sightingsWithLocation.length);
+                        console.log('📍 All sightings count:', plantDetail.allSightings?.length || 0);
+                        
+                        return sightingsWithLocation.length > 0;
+                    })() ? (
+                        <View style={{ marginBottom: 16 }}>
+                            {(() => {
+                                // Get unique locations from sightings
+                                const locationsMap = new Map();
+                                plantDetail.allSightings.forEach((sighting: any) => {
+                                    if (sighting.latitude && sighting.longitude && 
+                                        typeof sighting.latitude === 'number' && 
+                                        typeof sighting.longitude === 'number') {
+                                        const key = `${sighting.latitude.toFixed(4)},${sighting.longitude.toFixed(4)}`;
+                                        if (!locationsMap.has(key)) {
+                                            locationsMap.set(key, {
+                                                latitude: sighting.latitude,
+                                                longitude: sighting.longitude,
+                                                address: sighting.address,
+                                                timestamp: sighting.locationTimestamp || sighting.identifiedAt,
+                                                count: 1,
+                                                accuracy: sighting.accuracy
+                                            });
+                                        } else {
+                                            locationsMap.get(key).count++;
+                                        }
+                                    }
+                                });
+                                
+                                const uniqueLocations = Array.from(locationsMap.values());
+                                const mostRecentLocation = uniqueLocations.sort((a, b) => b.timestamp - a.timestamp)[0];
+                                
+                                console.log('🗺️ Unique locations found:', uniqueLocations.length);
+                                console.log('📍 Most recent location:', mostRecentLocation);
+                                
+                                return (
+                                    <View>
+                                        <Text style={{ 
+                                            fontSize: 16, 
+                                            fontWeight: '600', 
+                                            color: '#166534', 
+                                            marginBottom: 12,
+                                            textAlign: 'center'
+                                        }}>
+                                            📍 Sighting Locations ({uniqueLocations.length})
+                                        </Text>
 
+                                        {/* Primary Location Map Preview */}
+                                        <LocationMapPreview
+                                            location={{
+                                                latitude: mostRecentLocation.latitude,
+                                                longitude: mostRecentLocation.longitude,
+                                                address: mostRecentLocation.address,
+                                                accuracy: mostRecentLocation.accuracy,
+                                                timestamp: mostRecentLocation.timestamp
+                                            }}
+                                            plantName={plantDetail.commonNames?.[0] || plantDetail.scientificName}
+                                            style={{ marginBottom: 12 }}
+                                        />
+
+                                        {/* Multiple Locations Summary */}
+                                        {uniqueLocations.length > 1 && (
+                                            <View style={{
+                                                backgroundColor: 'white',
+                                                borderRadius: 8,
+                                                padding: 12,
+                                                borderWidth: 1,
+                                                borderColor: '#e5e7eb'
+                                            }}>
+                                                <Text style={{ 
+                                                    fontSize: 14, 
+                                                    fontWeight: '600', 
+                                                    color: '#166534', 
+                                                    marginBottom: 8,
+                                                    textAlign: 'center'
+                                                }}>
+                                                    🗺️ All Sighting Locations
+                                                </Text>
+                                                
+                                                {uniqueLocations.map((location, index) => (
+                                                    <TouchableOpacity
+                                                        key={index}
+                                                        style={{
+                                                            backgroundColor: index === 0 ? '#f0fdf4' : '#f9fafb',
+                                                            padding: 10,
+                                                            borderRadius: 6,
+                                                            marginBottom: index < uniqueLocations.length - 1 ? 8 : 0,
+                                                            borderWidth: 1,
+                                                            borderColor: index === 0 ? '#bbf7d0' : '#e5e7eb',
+                                                            flexDirection: 'row',
+                                                            alignItems: 'center',
+                                                            gap: 10
+                                                        }}
+                                                        onPress={() => {
+                                                            openInMaps(
+                                                                location.latitude, 
+                                                                location.longitude, 
+                                                                plantDetail.commonNames?.[0] || plantDetail.scientificName
+                                                            );
+                                                        }}
+                                                        activeOpacity={0.7}
+                                                    >
+                                                        {/* Location icon */}
+                                                        <View style={{
+                                                            backgroundColor: index === 0 ? '#059669' : '#6b7280',
+                                                            width: 32,
+                                                            height: 32,
+                                                            borderRadius: 6,
+                                                            justifyContent: 'center',
+                                                            alignItems: 'center'
+                                                        }}>
+                                                            <Text style={{ fontSize: 16 }}>
+                                                                {index === 0 ? '📍' : '📌'}
+                                                            </Text>
+                                                        </View>
+                                                        
+                                                        {/* Location info */}
+                                                        <View style={{ flex: 1 }}>
+                                                            {index === 0 && (
+                                                                <Text style={{ fontSize: 11, color: '#059669', fontWeight: '600', marginBottom: 2 }}>
+                                                                    Most Recent
+                                                                </Text>
+                                                            )}
+                                                            {location.address && (
+                                                                <Text style={{ fontSize: 12, color: '#374151', marginBottom: 2 }} numberOfLines={2}>
+                                                                    {location.address}
+                                                                </Text>
+                                                            )}
+                                                            <Text style={{ fontSize: 10, color: '#6b7280', fontFamily: 'monospace' }}>
+                                                                {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
+                                                            </Text>
+                                                            <Text style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>
+                                                                {location.count > 1 ? `${location.count} sightings` : '1 sighting'} • {new Date(location.timestamp).toLocaleDateString()}
+                                                            </Text>
+                                                        </View>
+                                                        
+                                                        {/* Tap indicator */}
+                                                        <View style={{
+                                                            backgroundColor: '#e5e7eb',
+                                                            paddingHorizontal: 6,
+                                                            paddingVertical: 2,
+                                                            borderRadius: 4
+                                                        }}>
+                                                            <Text style={{ fontSize: 9, color: '#6b7280', fontWeight: '600' }}>
+                                                                TAP
+                                                            </Text>
+                                                        </View>
+                                                    </TouchableOpacity>
+                                                ))}
+                                                
+                                                <Text style={{ 
+                                                    fontSize: 11, 
+                                                    color: '#6b7280', 
+                                                    textAlign: 'center', 
+                                                    marginTop: 8,
+                                                    fontStyle: 'italic'
+                                                }}>
+                                                    💡 Tap any location to open in maps
+                                                </Text>
+                                            </View>
+                                        )}
+                                    </View>
+                                );
+                            })()}
+                        </View>
+                    ) : (
+                        // Enhanced "no location data" message with more helpful information
+                        <View style={{ 
+                            marginBottom: 16,
+                            backgroundColor: '#fef3c7',
+                            borderRadius: 8,
+                            padding: 12,
+                            borderWidth: 1,
+                            borderColor: '#fcd34d'
+                        }}>
+                            <Text style={{ 
+                                fontSize: 14, 
+                                fontWeight: '600', 
+                                color: '#92400e', 
+                                marginBottom: 4,
+                                textAlign: 'center'
+                            }}>
+                                📍 No Location Data Available
+                            </Text>
+                            <Text style={{ 
+                                fontSize: 12, 
+                                color: '#92400e', 
+                                textAlign: 'center',
+                                lineHeight: 16,
+                                marginBottom: 8
+                            }}>
+                                This plant was identified without GPS location data. Future photo additions will include location information when:
+                            </Text>
+                            <View style={{ paddingLeft: 8 }}>
+                                <Text style={{ fontSize: 11, color: '#92400e', marginBottom: 2 }}>
+                                    • 📸 Photos contain GPS EXIF data
+                                </Text>
+                                <Text style={{ fontSize: 11, color: '#92400e', marginBottom: 2 }}>
+                                    • 🗺️ Manual location is selected during identification
+                                </Text>
+                                <Text style={{ fontSize: 11, color: '#92400e' }}>
+                                    • 📍 Device location services are enabled
+                                </Text>
+                            </View>
+                        </View>
+                    )}
+                    
+                    {/* Common in Area Section */}
+                    {currentLocation && (
+                        <View style={{ marginBottom: 12, padding: 10, backgroundColor: isCommonNearby ? '#dcfce7' : '#fef3c7', borderRadius: 8, borderWidth: 1, borderColor: isCommonNearby ? '#16a34a' : '#f59e0b' }}>
+                            <Text style={{ fontSize: 15, fontWeight: '600', color: isCommonNearby ? '#166534' : '#92400e', textAlign: 'center' }}>
+                                {isCommonNearby ? '🌱 Common in your area' : '🔍 Rare in your area'}
+                            </Text>
+                            <Text style={{ fontSize: 12, color: '#6b7280', textAlign: 'center', marginTop: 2 }}>
+                                Based on plant sightings within 50km of your current location.
+                            </Text>
+                        </View>
+                    )}
+                    
                     {/* Plant Info */}
                     <View style={{ marginBottom: 16, padding: 16, backgroundColor: 'white', borderRadius: 12 }}>
                         <Text selectable style={{ fontSize: 18, fontWeight: 'bold', color: '#15803d', marginBottom: 4 }}>
@@ -778,8 +1226,8 @@ export default function PlantDetailView({
                                             heading1: { fontSize: 14, fontWeight: 'bold', color: '#166534', marginBottom: 4 },
                                             heading2: { fontSize: 13, fontWeight: 'bold', color: '#166534', marginBottom: 3 },
                                             strong: { fontWeight: 'bold', color: '#166534' },
-                                            list_item: { fontSize: 12, color: '#374151', marginBottom: 2 },
-                                            paragraph: { fontSize: 12, color: '#374151', marginBottom: 4 }
+                                            list_item: { fontSize: 13, color: '#374151', marginBottom: 2 },
+                                            paragraph: { fontSize: 13, color: '#374151', marginBottom: 4 }
                                         }}>
                                             {plantDetail.traditionalUsage}
                                         </Markdown>
@@ -1124,6 +1572,37 @@ export default function PlantDetailView({
                                 No companion plant data available yet.
                             </Text>
                         )}
+                        <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>🐛 Common Pests</Text>
+                        {plantDetail.pests && plantDetail.pests.length > 0 ? (
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 10 }}>
+                                {plantDetail.pests.map((pest: string, index: number) => (
+                                    <View
+                                        key={index}
+                                        style={{
+                                            backgroundColor: '#fee2e2',
+                                            paddingHorizontal: 8,
+                                            paddingVertical: 4,
+                                            borderRadius: 12,
+                                            marginRight: 6,
+                                            marginBottom: 4,
+                                            borderWidth: 1,
+                                            borderColor: '#ef4444',
+                                            flexDirection: 'row',
+                                            alignItems: 'center'
+                                        }}
+                                    >
+                                        <Text selectable style={{ fontSize: 12, color: '#b91c1c', fontWeight: '500' }}>
+                                            {pest}
+                                        </Text>
+                                        <Text style={{ fontSize: 10, color: '#b91c1c', marginLeft: 4 }}>🐞</Text>
+                                    </View>
+                                ))}
+                            </View>
+                        ) : (
+                            <Text style={{ fontSize: 13, color: '#374151', marginBottom: 10 }}>
+                                No pest data available yet.
+                            </Text>
+                        )}
                         <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>🔎 More Details</Text>
                         {plantDetail.moreDetails ? (
                             <View style={{ 
@@ -1217,6 +1696,77 @@ export default function PlantDetailView({
                                 </Text>
                             </View>
                         )}
+                    </View>
+                </View>
+            )}
+
+            {/* Loading Overlays for Delete Operations */}
+            {(deletingPlant || deletingSighting || settingDefaultPhoto) && (
+                <View style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    zIndex: 1000,
+                }}>
+                    <View style={{
+                        backgroundColor: 'white',
+                        paddingVertical: 24,
+                        paddingHorizontal: 32,
+                        borderRadius: 16,
+                        alignItems: 'center',
+                        minWidth: 200,
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 4 },
+                        shadowOpacity: 0.3,
+                        shadowRadius: 8,
+                        elevation: 8,
+                    }}>
+                        <ActivityIndicator size="large" color={deletingPlant ? '#dc2626' : settingDefaultPhoto ? '#0ea5e9' : '#f59e0b'} />
+                        <Text style={{ 
+                            marginTop: 16, 
+                            fontSize: 16, 
+                            fontWeight: '600', 
+                            color: deletingPlant ? '#dc2626' : settingDefaultPhoto ? '#0ea5e9' : '#f59e0b',
+                            textAlign: 'center' 
+                        }}>
+                            {deletingPlant && '🗑️ Deleting Plant...'}
+                            {deletingSighting && '🗑️ Deleting Photo...'}
+                            {settingDefaultPhoto && '🖼️ Setting Default Photo...'}
+                        </Text>
+                        <Text style={{ 
+                            marginTop: 8, 
+                            fontSize: 12, 
+                            color: '#6b7280', 
+                            textAlign: 'center',
+                            lineHeight: 16
+                        }}>
+                            {deletingPlant && 'Removing species and all sightings from your collection'}
+                            {deletingSighting && 'Removing this photo from your plant gallery'}
+                            {settingDefaultPhoto && 'Making this your primary reference photo'}
+                        </Text>
+                        
+                        {/* Progress indicator */}
+                        <View style={{
+                            marginTop: 12,
+                            width: 120,
+                            height: 4,
+                            backgroundColor: '#f3f4f6',
+                            borderRadius: 2,
+                            overflow: 'hidden'
+                        }}>
+                            <View style={{
+                                width: '100%',
+                                height: '100%',
+                                backgroundColor: deletingPlant ? '#dc2626' : settingDefaultPhoto ? '#0ea5e9' : '#f59e0b',
+                                borderRadius: 2,
+                                opacity: 0.8
+                            }} />
+                        </View>
                     </View>
                 </View>
             )}

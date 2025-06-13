@@ -12,15 +12,33 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+    "plugins": [
+      "expo-location",
+      "expo-image-picker",
+      "expo-media-library"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app uses location to tag plants you identify and record where you found them.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses location to tag plants you identify and record where you found them.",
+        "NSCameraUsageDescription": "This app uses the camera to take photos of plants for identification.",
+        "NSPhotoLibraryUsageDescription": "This app accesses your photo library to select plant photos for identification."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

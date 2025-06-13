@@ -9,8 +9,10 @@ import {
     TextInput,
     ScrollView,
     Linking,
-    Platform 
+    Platform,
+    Dimensions 
 } from 'react-native';
+import MapView, { Marker, Region } from 'react-native-maps';
 import { useLocationHandler, LocationData } from '../hooks/useLocationHandler';
 
 interface LocationPickerModalProps {
@@ -38,10 +40,26 @@ export default function LocationPickerModal({
     const [manualCoords, setManualCoords] = useState({ lat: '', lng: '' });
     const [manualAddress, setManualAddress] = useState('');
     const [isManualEntry, setIsManualEntry] = useState(false);
+    const [showMap, setShowMap] = useState(true);
+    const [mapRegion, setMapRegion] = useState<Region>({
+        latitude: currentLocation?.latitude || 37.78825,
+        longitude: currentLocation?.longitude || -122.4324,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+    });
+    const [isMapReady, setIsMapReady] = useState(false);
+
+    const screenHeight = Dimensions.get('window').height;
 
     useEffect(() => {
         if (currentLocation) {
             setSelectedLocation(currentLocation);
+            setMapRegion({
+                latitude: currentLocation.latitude,
+                longitude: currentLocation.longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+            });
         }
     }, [currentLocation]);
 
@@ -50,6 +68,12 @@ export default function LocationPickerModal({
             const location = await getCurrentLocation();
             if (location) {
                 setSelectedLocation(location);
+                setMapRegion({
+                    latitude: location.latitude,
+                    longitude: location.longitude,
+                    latitudeDelta: 0.01,
+                    longitudeDelta: 0.01,
+                });
                 Alert.alert(
                     'Location Found!',
                     `Current location: ${location.address || 'Unknown address'}\n\nCoordinates: ${formatDecimalCoordinates(location.latitude, location.longitude)}`,
@@ -59,6 +83,24 @@ export default function LocationPickerModal({
         } catch (error) {
             console.error('Error getting location:', error);
         }
+    };
+
+    const handleMapPress = (event: any) => {
+        const { coordinate } = event.nativeEvent;
+        const location: LocationData = {
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            address: `Location: ${coordinate.latitude.toFixed(6)}, ${coordinate.longitude.toFixed(6)}`,
+            timestamp: Date.now()
+        };
+        setSelectedLocation(location);
+        
+        // Provide immediate feedback
+        console.log(`📍 Location selected: ${coordinate.latitude.toFixed(6)}, ${coordinate.longitude.toFixed(6)}`);
+    };
+
+    const handleMapReady = () => {
+        setIsMapReady(true);
     };
 
     const handleManualLocationEntry = () => {
@@ -88,6 +130,12 @@ export default function LocationPickerModal({
         };
 
         setSelectedLocation(location);
+        setMapRegion({
+            latitude: lat,
+            longitude: lng,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+        });
         setIsManualEntry(false);
         Alert.alert(
             'Location Set!',
@@ -115,6 +163,12 @@ export default function LocationPickerModal({
     const resetToCurrentLocation = () => {
         if (currentLocation) {
             setSelectedLocation(currentLocation);
+            setMapRegion({
+                latitude: currentLocation.latitude,
+                longitude: currentLocation.longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+            });
         }
     };
 
@@ -138,7 +192,7 @@ export default function LocationPickerModal({
                     padding: 24,
                     width: '100%',
                     maxWidth: 420,
-                    maxHeight: '90%'
+                    maxHeight: showMap ? '95%' : '90%'
                 }}>
                     <ScrollView showsVerticalScrollIndicator={false}>
                         <Text style={{ 
@@ -172,9 +226,6 @@ export default function LocationPickerModal({
                                 <Text style={{ fontSize: 12, color: '#6b7280', fontFamily: 'monospace' }}>
                                     🌐 {formatDecimalCoordinates(selectedLocation.latitude, selectedLocation.longitude)}
                                 </Text>
-                                <Text style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
-                                    📐 {formatCoordinates(selectedLocation.latitude, selectedLocation.longitude)}
-                                </Text>
                                 
                                 {/* Preview in Maps */}
                                 <TouchableOpacity
@@ -195,173 +246,229 @@ export default function LocationPickerModal({
                             </View>
                         )}
 
-                        {/* Location Options */}
-                        <View style={{ marginBottom: 20 }}>
-                            {/* Use Current GPS Location */}
-                            <TouchableOpacity
-                                style={{
-                                    backgroundColor: loadingLocation ? '#9ca3af' : '#059669',
-                                    paddingVertical: 12,
-                                    paddingHorizontal: 16,
-                                    borderRadius: 8,
-                                    alignItems: 'center',
-                                    marginBottom: 12,
-                                    opacity: loadingLocation ? 0.6 : 1,
-                                    flexDirection: 'row',
-                                    justifyContent: 'center'
-                                }}
-                                onPress={handleGetCurrentLocation}
-                                disabled={loadingLocation}
-                            >
-                                {loadingLocation ? (
-                                    <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
-                                ) : (
-                                    <Text style={{ fontSize: 16, marginRight: 8 }}>📍</Text>
+                        {/* Map View */}
+                        {showMap && (
+                            <View style={{
+                                height: Math.min(screenHeight * 0.5, 350), // Larger map
+                                borderRadius: 12,
+                                overflow: 'hidden',
+                                marginBottom: 16,
+                                borderWidth: 2,
+                                borderColor: '#059669',
+                                backgroundColor: '#f3f4f6'
+                            }}>
+                                {!isMapReady && (
+                                    <View style={{
+                                        position: 'absolute',
+                                        top: 0,
+                                        left: 0,
+                                        right: 0,
+                                        bottom: 0,
+                                        backgroundColor: '#f9fafb',
+                                        justifyContent: 'center',
+                                        alignItems: 'center',
+                                        zIndex: 1000
+                                    }}>
+                                        <ActivityIndicator size="large" color="#059669" />
+                                        <Text style={{ marginTop: 8, color: '#6b7280', fontSize: 12 }}>
+                                            Loading map...
+                                        </Text>
+                                    </View>
                                 )}
-                                <Text style={{ color: 'white', fontWeight: '600', fontSize: 14 }}>
-                                    {loadingLocation ? 'Getting Location...' : 'Use Current GPS Location'}
-                                </Text>
-                            </TouchableOpacity>
+                                <MapView
+                                    style={{ flex: 1 }}
+                                    region={mapRegion}
+                                    onRegionChangeComplete={setMapRegion}
+                                    onPress={handleMapPress}
+                                    showsUserLocation={true}
+                                    showsMyLocationButton={true}
+                                    onMapReady={handleMapReady}
+                                    loadingEnabled={true}
+                                    loadingIndicatorColor="#059669"
+                                    showsCompass={true}
+                                    showsScale={true}
+                                >
+                                    {selectedLocation && (
+                                        <Marker
+                                            coordinate={{
+                                                latitude: selectedLocation.latitude,
+                                                longitude: selectedLocation.longitude,
+                                            }}
+                                            title="Selected Location"
+                                            description={selectedLocation.address || "Selected plant location"}
+                                            pinColor="#059669"
+                                        />
+                                    )}
+                                </MapView>
+                                <View style={{
+                                    position: 'absolute',
+                                    top: 8,
+                                    left: 8,
+                                    backgroundColor: 'rgba(5,150,105,0.9)',
+                                    paddingHorizontal: 10,
+                                    paddingVertical: 6,
+                                    borderRadius: 6
+                                }}>
+                                    <Text style={{ color: 'white', fontSize: 11, fontWeight: '600' }}>
+                                        📍 Tap anywhere to select location
+                                    </Text>
+                                </View>
+                                {selectedLocation && (
+                                    <View style={{
+                                        position: 'absolute',
+                                        bottom: 8,
+                                        left: 8,
+                                        right: 8,
+                                        backgroundColor: 'rgba(5,150,105,0.95)',
+                                        paddingHorizontal: 10,
+                                        paddingVertical: 6,
+                                        borderRadius: 6
+                                    }}>
+                                        <Text style={{ color: 'white', fontSize: 10, fontWeight: '600', textAlign: 'center' }}>
+                                            ✅ Location selected: {selectedLocation.latitude.toFixed(6)}, {selectedLocation.longitude.toFixed(6)}
+                                        </Text>
+                                    </View>
+                                )}
+                            </View>
+                        )}
+
+                        {/* Location Options - Simplified */}
+                        <View style={{ marginBottom: 16 }}>
+                            {/* Secondary Options - Smaller and less prominent */}
+                            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                                {/* Use Current GPS Location */}
+                                <TouchableOpacity
+                                    style={{
+                                        flex: 1,
+                                        backgroundColor: loadingLocation ? '#9ca3af' : '#0ea5e9',
+                                        paddingVertical: 10,
+                                        paddingHorizontal: 12,
+                                        borderRadius: 6,
+                                        alignItems: 'center',
+                                        opacity: loadingLocation ? 0.6 : 1,
+                                        flexDirection: 'row',
+                                        justifyContent: 'center'
+                                    }}
+                                    onPress={handleGetCurrentLocation}
+                                    disabled={loadingLocation}
+                                >
+                                    {loadingLocation ? (
+                                        <ActivityIndicator size="small" color="white" style={{ marginRight: 6 }} />
+                                    ) : (
+                                        <Text style={{ fontSize: 14, marginRight: 6 }}>📍</Text>
+                                    )}
+                                    <Text style={{ color: 'white', fontWeight: '600', fontSize: 12 }}>
+                                        {loadingLocation ? 'Getting...' : 'Use GPS'}
+                                    </Text>
+                                </TouchableOpacity>
+
+                                {/* Manual Entry Toggle */}
+                                <TouchableOpacity
+                                    style={{
+                                        flex: 1,
+                                        backgroundColor: isManualEntry ? '#dc2626' : '#6b7280',
+                                        paddingVertical: 10,
+                                        paddingHorizontal: 12,
+                                        borderRadius: 6,
+                                        alignItems: 'center'
+                                    }}
+                                    onPress={() => setIsManualEntry(!isManualEntry)}
+                                >
+                                    <Text style={{ color: 'white', fontWeight: '600', fontSize: 12 }}>
+                                        {isManualEntry ? '❌ Cancel' : '✏️ Manual'}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
 
                             {/* Reset to Default (if current location exists) */}
                             {currentLocation && selectedLocation !== currentLocation && (
                                 <TouchableOpacity
                                     style={{
-                                        backgroundColor: '#6b7280',
-                                        paddingVertical: 10,
-                                        paddingHorizontal: 16,
-                                        borderRadius: 8,
+                                        backgroundColor: '#f3f4f6',
+                                        paddingVertical: 8,
+                                        paddingHorizontal: 12,
+                                        borderRadius: 6,
                                         alignItems: 'center',
-                                        marginBottom: 12
+                                        borderWidth: 1,
+                                        borderColor: '#d1d5db'
                                     }}
                                     onPress={resetToCurrentLocation}
                                 >
-                                    <Text style={{ color: 'white', fontWeight: '600', fontSize: 13 }}>
+                                    <Text style={{ color: '#6b7280', fontWeight: '600', fontSize: 11 }}>
                                         🔄 Reset to Current Location
                                     </Text>
                                 </TouchableOpacity>
                             )}
-
-                            {/* Manual Entry Toggle */}
-                            <TouchableOpacity
-                                style={{
-                                    backgroundColor: isManualEntry ? '#dc2626' : '#0ea5e9',
-                                    paddingVertical: 10,
-                                    paddingHorizontal: 16,
-                                    borderRadius: 8,
-                                    alignItems: 'center',
-                                    marginBottom: 12
-                                }}
-                                onPress={() => setIsManualEntry(!isManualEntry)}
-                            >
-                                <Text style={{ color: 'white', fontWeight: '600', fontSize: 13 }}>
-                                    {isManualEntry ? '❌ Cancel Manual Entry' : '✏️ Enter Coordinates Manually'}
-                                </Text>
-                            </TouchableOpacity>
-
-                            {/* Web Maps Link */}
-                            <TouchableOpacity
-                                style={{
-                                    backgroundColor: '#f59e0b',
-                                    paddingVertical: 10,
-                                    paddingHorizontal: 16,
-                                    borderRadius: 8,
-                                    alignItems: 'center',
-                                    marginBottom: 12
-                                }}
-                                onPress={handleOpenWebMaps}
-                            >
-                                <Text style={{ color: 'white', fontWeight: '600', fontSize: 13 }}>
-                                    🌐 Open Google Maps in Browser
-                                </Text>
-                            </TouchableOpacity>
                         </View>
 
-                        {/* Manual Entry Form */}
+                        {/* Simplified Manual Entry Form */}
                         {isManualEntry && (
                             <View style={{
                                 backgroundColor: '#f8fafc',
-                                padding: 16,
+                                padding: 12,
                                 borderRadius: 8,
                                 marginBottom: 16,
                                 borderWidth: 1,
                                 borderColor: '#e2e8f0'
                             }}>
-                                <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 12 }}>
-                                    📝 Enter Location Details:
+                                <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 10 }}>
+                                    📝 Manual Coordinates:
                                 </Text>
 
-                                <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
-                                    📍 Address/Description (optional):
-                                </Text>
-                                <TextInput
-                                    style={{
-                                        borderWidth: 1,
-                                        borderColor: '#d1d5db',
-                                        borderRadius: 6,
-                                        padding: 10,
-                                        marginBottom: 12,
-                                        fontSize: 13
-                                    }}
-                                    placeholder="e.g., 'Near oak tree in Central Park' or full address"
-                                    value={manualAddress}
-                                    onChangeText={setManualAddress}
-                                />
+                                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>
+                                            Latitude:
+                                        </Text>
+                                        <TextInput
+                                            style={{
+                                                borderWidth: 1,
+                                                borderColor: '#d1d5db',
+                                                borderRadius: 6,
+                                                padding: 8,
+                                                fontSize: 12,
+                                                fontFamily: 'monospace'
+                                            }}
+                                            placeholder="40.785091"
+                                            value={manualCoords.lat}
+                                            onChangeText={(text) => setManualCoords(prev => ({ ...prev, lat: text }))}
+                                            keyboardType="numeric"
+                                        />
+                                    </View>
 
-                                <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
-                                    🌐 Latitude:
-                                </Text>
-                                <TextInput
-                                    style={{
-                                        borderWidth: 1,
-                                        borderColor: '#d1d5db',
-                                        borderRadius: 6,
-                                        padding: 10,
-                                        marginBottom: 8,
-                                        fontSize: 13,
-                                        fontFamily: 'monospace'
-                                    }}
-                                    placeholder="e.g., 40.785091"
-                                    value={manualCoords.lat}
-                                    onChangeText={(text) => setManualCoords(prev => ({ ...prev, lat: text }))}
-                                    keyboardType="numeric"
-                                />
-
-                                <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
-                                    🌐 Longitude:
-                                </Text>
-                                <TextInput
-                                    style={{
-                                        borderWidth: 1,
-                                        borderColor: '#d1d5db',
-                                        borderRadius: 6,
-                                        padding: 10,
-                                        marginBottom: 12,
-                                        fontSize: 13,
-                                        fontFamily: 'monospace'
-                                    }}
-                                    placeholder="e.g., -73.968285"
-                                    value={manualCoords.lng}
-                                    onChangeText={(text) => setManualCoords(prev => ({ ...prev, lng: text }))}
-                                    keyboardType="numeric"
-                                />
-
-                                <Text style={{ fontSize: 11, color: '#9ca3af', marginBottom: 12, lineHeight: 14 }}>
-                                    💡 Tip: You can find coordinates by opening Google Maps in your browser, right-clicking on a location, and copying the coordinates.
-                                </Text>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>
+                                            Longitude:
+                                        </Text>
+                                        <TextInput
+                                            style={{
+                                                borderWidth: 1,
+                                                borderColor: '#d1d5db',
+                                                borderRadius: 6,
+                                                padding: 8,
+                                                fontSize: 12,
+                                                fontFamily: 'monospace'
+                                            }}
+                                            placeholder="-73.968285"
+                                            value={manualCoords.lng}
+                                            onChangeText={(text) => setManualCoords(prev => ({ ...prev, lng: text }))}
+                                            keyboardType="numeric"
+                                        />
+                                    </View>
+                                </View>
 
                                 <TouchableOpacity
                                     style={{
                                         backgroundColor: '#059669',
-                                        paddingVertical: 10,
-                                        paddingHorizontal: 16,
+                                        paddingVertical: 8,
+                                        paddingHorizontal: 12,
                                         borderRadius: 6,
                                         alignItems: 'center'
                                     }}
                                     onPress={handleManualLocationEntry}
                                 >
-                                    <Text style={{ color: 'white', fontWeight: '600', fontSize: 13 }}>
-                                        ✅ Set This Location
+                                    <Text style={{ color: 'white', fontWeight: '600', fontSize: 12 }}>
+                                        ✅ Set Location
                                     </Text>
                                 </TouchableOpacity>
                             </View>
@@ -395,7 +502,7 @@ export default function LocationPickerModal({
                                 disabled={!selectedLocation}
                             >
                                 <Text style={{ color: 'white', fontWeight: '600' }}>
-                                    {selectedLocation ? '✅ Use This Location' : 'Select Location'}
+                                    {selectedLocation ? 'Use This Location' : 'Select Location'}
                                 </Text>
                             </TouchableOpacity>
                         </View>

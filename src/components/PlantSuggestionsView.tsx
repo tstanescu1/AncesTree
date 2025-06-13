@@ -1,8 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { View, Text, TouchableOpacity, Image, Alert, ScrollView, TextInput, Modal, Dimensions, Animated, ActivityIndicator } from 'react-native';
 import { PinchGestureHandler, PanGestureHandler, State } from 'react-native-gesture-handler';
-import { useLocationHandler, LocationData } from '../hooks/useLocationHandler';
-import LocationPickerModal from './LocationPickerModal';
+import { LocationData } from '../hooks/useLocationHandler';
+import { useLocationHandler } from '../hooks/useLocationHandler';
 
 interface PlantSuggestion {
   plantId?: any;
@@ -18,11 +18,13 @@ interface PlantSuggestion {
 interface PlantSuggestionsViewProps {
   suggestions: PlantSuggestion[];
   userPhotoBase64: string;
-  onPlantSelected: (suggestion: PlantSuggestion, feedback?: string, location?: LocationData) => void;
+  onPlantSelected: (suggestion: PlantSuggestion, feedback?: string, location?: LocationData | null) => void;
   onRequestBetterIdentification: (userDescription: string, rejectedSuggestions: string[]) => void;
   onBackToCamera: () => void;
   onRejectionFeedback: (rejectedPlantName: string, allSuggestions: PlantSuggestion[]) => void;
   loading: boolean;
+  // Location props
+  selectedLocation?: LocationData | null;
 }
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -34,15 +36,30 @@ export default function PlantSuggestionsView({
   onRequestBetterIdentification,
   onBackToCamera,
   onRejectionFeedback,
-  loading
+  loading,
+  // Location props
+  selectedLocation,
 }: PlantSuggestionsViewProps) {
+  // Get location directly from hook - this is the clever fix!
+  const { currentLocation } = useLocationHandler();
+  
   const [selectedSuggestion, setSelectedSuggestion] = useState<PlantSuggestion | null>(null);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [userFeedback, setUserFeedback] = useState('');
   const [showRequestBetterModal, setShowRequestBetterModal] = useState(false);
+  const [userFeedback, setUserFeedback] = useState('');
   const [userDescription, setUserDescription] = useState('');
+  const [isLoading, setIsLoading] = useState(false); // For better identification
+  const [isAddingToCollection, setIsAddingToCollection] = useState(false); // For adding to collection
   const [rejectedSuggestions, setRejectedSuggestions] = useState<string[]>([]);
+  const [visibleSuggestions, setVisibleSuggestions] = useState<PlantSuggestion[]>(suggestions);
   const [fadingOutSuggestions, setFadingOutSuggestions] = useState<Set<string>>(new Set());
+
+  // Add local loading states for immediate feedback
+  const [localLoading, setLocalLoading] = useState(false);
+  const [processingSelection, setProcessingSelection] = useState(false);
+
+  // Combine parent loading with local loading states
+  const isLoadingCombined = loading || localLoading || processingSelection;
 
   // Create refs for suggestion animations
   const suggestionAnimations = useRef<{ [key: string]: { opacity: Animated.Value; scale: Animated.Value } }>({});
@@ -62,19 +79,6 @@ export default function PlantSuggestionsView({
   const lastPanX = useRef(0);
   const lastPanY = useRef(0);
 
-  // Location state
-  const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(null);
-  const [showLocationPicker, setShowLocationPicker] = useState(false);
-  const [useCurrentLocation, setUseCurrentLocation] = useState(true);
-  
-  const { 
-    currentLocation, 
-    getCurrentLocation, 
-    loadingLocation, 
-    formatDecimalCoordinates, 
-    formatCoordinates 
-  } = useLocationHandler();
-
   // Initialize animation values for suggestions
   React.useEffect(() => {
     suggestions.forEach(suggestion => {
@@ -90,41 +94,45 @@ export default function PlantSuggestionsView({
   }, [suggestions]);
 
   // Filter out rejected suggestions for display
-  const visibleSuggestions = suggestions.filter(
+  const visibleSuggestionsFiltered = suggestions.filter(
     suggestion => !rejectedSuggestions.includes(suggestion.scientificName)
   );
 
   const handleSelectPlant = (suggestion: PlantSuggestion) => {
+    // Set loading immediately for user feedback
+    setLocalLoading(true);
+    
+    // Small delay to show the loading state, then open modal
+    setTimeout(() => {
     setSelectedSuggestion(suggestion);
     setShowFeedbackModal(true);
     setUserFeedback('');
-    setSelectedLocation(null);
-    setUseCurrentLocation(true);
+      setLocalLoading(false); // Reset after modal opens
+    }, 100);
   };
 
   const confirmSelection = async (withFeedback: boolean = false) => {
     if (!selectedSuggestion) return;
-
-    let locationToUse: LocationData | null = null;
-
-    // If user wants to use current location, get it
-    if (useCurrentLocation) {
-      try {
-        locationToUse = await getCurrentLocation();
-      } catch (error) {
-        console.warn('Could not get current location:', error);
-        // Continue without location if it fails
-      }
-    } else if (selectedLocation) {
-      locationToUse = selectedLocation;
+    
+    setIsAddingToCollection(true);
+    try {
+      // Clever fix: Use currentLocation from hook (which gets updated when GPS button is clicked)
+      // or fall back to selectedLocation prop (for map-selected locations)
+      const locationToUse = currentLocation || selectedLocation;
+      
+      console.log('🔍 CLEVER FIX - Using location:', locationToUse);
+      console.log('  currentLocation from hook:', currentLocation);
+      console.log('  selectedLocation from prop:', selectedLocation);
+      
+      await onPlantSelected(selectedSuggestion, withFeedback ? userFeedback : undefined, locationToUse);
+      setShowFeedbackModal(false);
+      setUserFeedback('');
+      setSelectedSuggestion(null);
+    } catch (error) {
+      console.error('Error adding plant to collection:', error);
+    } finally {
+      setIsAddingToCollection(false);
     }
-
-    onPlantSelected(selectedSuggestion, withFeedback ? userFeedback : undefined, locationToUse || undefined);
-    setShowFeedbackModal(false);
-    setSelectedSuggestion(null);
-    setUserFeedback('');
-    setSelectedLocation(null);
-    setUseCurrentLocation(true);
   };
 
   const rejectSuggestion = (scientificName: string, commonName: string) => {
@@ -162,11 +170,21 @@ export default function PlantSuggestionsView({
   };
 
   const requestBetterIdentification = () => {
-    if (userDescription.trim()) {
-      onRequestBetterIdentification(userDescription, rejectedSuggestions);
-      setShowRequestBetterModal(false);
-      setUserDescription('');
-    }
+    if (!userDescription.trim()) return;
+    
+    setIsLoading(true);
+    setShowRequestBetterModal(false);
+    
+    // Call the parent function to request better identification
+    onRequestBetterIdentification(userDescription, rejectedSuggestions);
+    
+    // Reset the description
+    setUserDescription('');
+    
+    // Reset loading state after a timeout (assuming parent handles the actual request)
+    setTimeout(() => {
+      setIsLoading(false);
+    }, 5000);
   };
 
   // Enhanced reset that completely clears all gesture state
@@ -364,7 +382,7 @@ export default function PlantSuggestionsView({
       </View>
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-        {visibleSuggestions.length === 0 ? (
+        {visibleSuggestionsFiltered.length === 0 ? (
           <View style={{
             backgroundColor: 'white',
             padding: 24,
@@ -594,17 +612,17 @@ export default function PlantSuggestionsView({
                   <TouchableOpacity
                     style={{
                       flex: 1,
-                      backgroundColor: loading ? '#9ca3af' : '#059669',
+                      backgroundColor: isLoadingCombined ? '#9ca3af' : '#059669',
                       paddingVertical: 12,
                       borderRadius: 8,
                       alignItems: 'center',
-                      opacity: loading ? 0.6 : 1,
+                      opacity: isLoadingCombined ? 0.6 : 1,
                     }}
                     onPress={() => handleSelectPlant(suggestion)}
-                    disabled={loading}
+                    disabled={isLoadingCombined}
                   >
                     <Text style={{ color: 'white', fontWeight: '600', fontSize: 14 }}>
-                      {loading ? '⏳ Processing...' : '✓ Select This Plant'}
+                      {isLoadingCombined ? '⏳ Processing...' : '✓ Select This Plant'}
                     </Text>
                   </TouchableOpacity>
 
@@ -633,27 +651,27 @@ export default function PlantSuggestionsView({
         )}
 
         {/* Request Better Identification Button - Only show if there are visible suggestions */}
-        {visibleSuggestions.length > 0 && (
+        {visibleSuggestionsFiltered.length > 0 && (
           <TouchableOpacity
             style={{
-              backgroundColor: loading ? '#9ca3af' : '#f59e0b',
+              backgroundColor: isLoadingCombined ? '#9ca3af' : '#f59e0b',
               paddingVertical: 16,
               paddingHorizontal: 20,
               borderRadius: 12,
               alignItems: 'center',
               marginVertical: 20,
               borderWidth: 2,
-              borderColor: loading ? '#6b7280' : '#fbbf24',
-              opacity: loading ? 0.6 : 1,
+              borderColor: isLoadingCombined ? '#6b7280' : '#fbbf24',
+              opacity: isLoadingCombined ? 0.6 : 1,
             }}
             onPress={() => setShowRequestBetterModal(true)}
-            disabled={loading}
+            disabled={isLoadingCombined}
           >
             <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16, marginBottom: 4 }}>
-              {loading ? '🤖 Processing AI...' : '🤖 None of these look right?'}
+              {isLoadingCombined ? '🤖 Processing AI...' : '🤖 None of these look right?'}
             </Text>
             <Text style={{ color: '#fef3c7', fontSize: 12, textAlign: 'center' }}>
-              {loading ? 'Please wait...' : 'Get 5 AI-powered alternatives using GPT-4o vision analysis'}
+              {isLoadingCombined ? 'Please wait...' : 'Get 5 AI-powered alternatives using GPT-4o vision analysis'}
             </Text>
           </TouchableOpacity>
         )}
@@ -916,131 +934,6 @@ export default function PlantSuggestionsView({
                 </>
               )}
 
-              {/* Location Section */}
-              <View style={{
-                backgroundColor: '#f0fdf4',
-                padding: 14,
-                borderRadius: 12,
-                marginBottom: 16,
-                borderWidth: 1,
-                borderColor: '#bbf7d0'
-              }}>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: '#166534', marginBottom: 12 }}>
-                  📍 Plant Location
-                </Text>
-                
-                {/* Current location display */}
-                {(useCurrentLocation && currentLocation) || selectedLocation ? (
-                  <View style={{
-                    backgroundColor: '#dcfce7',
-                    padding: 10,
-                    borderRadius: 8,
-                    marginBottom: 12,
-                    borderWidth: 1,
-                    borderColor: '#22c55e'
-                  }}>
-                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534', marginBottom: 4 }}>
-                      📌 {useCurrentLocation ? 'Current GPS Location:' : 'Selected Location:'}
-                    </Text>
-                    {((useCurrentLocation && currentLocation) || selectedLocation) && (
-                      <>
-                        {(useCurrentLocation ? currentLocation?.address : selectedLocation?.address) && (
-                          <Text style={{ fontSize: 12, color: '#374151', marginBottom: 2 }}>
-                            📍 {useCurrentLocation ? currentLocation?.address : selectedLocation?.address}
-                          </Text>
-                        )}
-                        <Text style={{ fontSize: 11, color: '#6b7280', fontFamily: 'monospace' }}>
-                          🌐 {formatDecimalCoordinates(
-                            useCurrentLocation ? currentLocation!.latitude : selectedLocation!.latitude,
-                            useCurrentLocation ? currentLocation!.longitude : selectedLocation!.longitude
-                          )}
-                        </Text>
-                      </>
-                    )}
-                  </View>
-                ) : (
-                  <View style={{
-                    backgroundColor: '#fef3c7',
-                    padding: 10,
-                    borderRadius: 8,
-                    marginBottom: 12,
-                    borderWidth: 1,
-                    borderColor: '#f59e0b'
-                  }}>
-                    <Text style={{ fontSize: 12, color: '#92400e' }}>
-                      🌍 No location selected - plant will be saved without location data
-                    </Text>
-                  </View>
-                )}
-
-                {/* Location options */}
-                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
-                  <TouchableOpacity
-                    style={{
-                      flex: 1,
-                      backgroundColor: (useCurrentLocation && !selectedLocation) ? '#059669' : '#6b7280',
-                      paddingVertical: 8,
-                      paddingHorizontal: 12,
-                      borderRadius: 6,
-                      alignItems: 'center',
-                      flexDirection: 'row',
-                      justifyContent: 'center'
-                    }}
-                    onPress={() => {
-                      setUseCurrentLocation(true);
-                      setSelectedLocation(null);
-                    }}
-                  >
-                    {loadingLocation && useCurrentLocation ? (
-                      <ActivityIndicator size="small" color="white" style={{ marginRight: 4 }} />
-                    ) : (
-                      <Text style={{ fontSize: 12, marginRight: 4 }}>📍</Text>
-                    )}
-                    <Text style={{ color: 'white', fontWeight: '600', fontSize: 11 }}>
-                      {loadingLocation && useCurrentLocation ? 'Getting...' : 'Use GPS'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={{
-                      flex: 1,
-                      backgroundColor: '#0ea5e9',
-                      paddingVertical: 8,
-                      paddingHorizontal: 12,
-                      borderRadius: 6,
-                      alignItems: 'center'
-                    }}
-                    onPress={() => setShowLocationPicker(true)}
-                  >
-                    <Text style={{ color: 'white', fontWeight: '600', fontSize: 11 }}>
-                      🗺️ Choose Location
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Clear location option */}
-                {(selectedLocation || (useCurrentLocation && currentLocation)) && (
-                  <TouchableOpacity
-                    style={{
-                      backgroundColor: '#dc2626',
-                      paddingVertical: 6,
-                      paddingHorizontal: 10,
-                      borderRadius: 6,
-                      alignItems: 'center',
-                      alignSelf: 'center'
-                    }}
-                    onPress={() => {
-                      setSelectedLocation(null);
-                      setUseCurrentLocation(false);
-                    }}
-                  >
-                    <Text style={{ color: 'white', fontWeight: '600', fontSize: 10 }}>
-                      ❌ No Location
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-
               {/* Notes Section */}
               <Text style={{ fontSize: 14, color: '#374151', marginBottom: 12 }}>
                 Optional: Add any notes or corrections about this identification:
@@ -1074,8 +967,6 @@ export default function PlantSuggestionsView({
                   }}
                   onPress={() => {
                     setShowFeedbackModal(false);
-                    setSelectedLocation(null);
-                    setUseCurrentLocation(true);
                   }}
                 >
                   <Text style={{ color: 'white', fontWeight: '600' }}>Cancel</Text>
@@ -1084,17 +975,17 @@ export default function PlantSuggestionsView({
                 <TouchableOpacity
                   style={{
                     flex: 1,
-                    backgroundColor: loading ? '#9ca3af' : '#059669',
+                    backgroundColor: isAddingToCollection ? '#9ca3af' : '#059669',
                     paddingVertical: 12,
                     borderRadius: 8,
                     alignItems: 'center',
-                    opacity: loading ? 0.6 : 1,
+                    opacity: isAddingToCollection ? 0.6 : 1,
                   }}
                   onPress={() => confirmSelection(true)}
-                  disabled={loading}
+                  disabled={isAddingToCollection}
                 >
                   <Text style={{ color: 'white', fontWeight: '600' }}>
-                    {loading ? '⏳ Adding...' : 'Add to Collection'}
+                    {isAddingToCollection ? '⏳ Adding...' : 'Add to Collection'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -1205,7 +1096,7 @@ export default function PlantSuggestionsView({
               />
 
               {/* Show rejected suggestions reminder */}
-              {visibleSuggestions.length < suggestions.length && (
+              {visibleSuggestionsFiltered.length < suggestions.length && (
                 <View style={{ 
                   backgroundColor: '#fef2f2', 
                   padding: 10, 
@@ -1219,7 +1110,7 @@ export default function PlantSuggestionsView({
                   </Text>
                   <Text style={{ fontSize: 11, color: '#7f1d1d', marginTop: 2 }}>
                     {suggestions
-                      .filter(s => !visibleSuggestions.includes(s))
+                      .filter(s => !visibleSuggestionsFiltered.includes(s))
                       .map(s => s.commonNames[0] || s.scientificName)
                       .join(', ')}
                   </Text>
@@ -1246,21 +1137,21 @@ export default function PlantSuggestionsView({
               <TouchableOpacity
                 style={{
                     flex: 2,
-                    backgroundColor: loading ? '#9ca3af' : (userDescription.trim() ? '#f59e0b' : '#d1d5db'),
+                    backgroundColor: isLoading ? '#9ca3af' : (userDescription.trim() ? '#f59e0b' : '#d1d5db'),
                     paddingVertical: 14,
                   borderRadius: 8,
                   alignItems: 'center',
-                  opacity: loading ? 0.6 : 1,
+                  opacity: isLoading ? 0.6 : 1,
                 }}
                 onPress={requestBetterIdentification}
-                disabled={!userDescription.trim() || loading}
+                disabled={!userDescription.trim() || isLoading}
               >
                   <Text style={{ 
                     color: userDescription.trim() ? 'white' : '#9ca3af', 
                     fontWeight: '600',
                     fontSize: 13
                   }}>
-                    {loading ? '🤖 GPT-4o Analyzing Image & Description...' : '🔍 Get 5 GPT-4o Powered Suggestions'}
+                    {isLoading ? '🔍 Finding better species matches...' : '🔍 Get 5 Alternative Suggestions'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1276,14 +1167,14 @@ export default function PlantSuggestionsView({
       </Modal>
 
       {/* Loading overlay for GPT-4o analysis */}
-      {loading && !showRequestBetterModal && (
+      {isLoading && !showRequestBetterModal && (
         <View style={{
           position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.4)',
+          top: -100,
+          left: -100,
+          width: screenWidth + 200,
+          height: screenHeight + 200,
+          backgroundColor: 'rgba(0,0,0,0.5)',
           justifyContent: 'center',
           alignItems: 'center',
           zIndex: 1000,
@@ -1299,25 +1190,14 @@ export default function PlantSuggestionsView({
           }}>
             <ActivityIndicator size="large" color="#f59e0b" />
             <Text style={{ marginTop: 12, fontSize: 14, fontWeight: '600', color: '#92400e', textAlign: 'center' }}>
-              GPT-4o is analyzing your photo and description…
+              🔍 Finding alternative species matches...
             </Text>
             <Text style={{ marginTop: 4, fontSize: 12, color: '#78350f', textAlign: 'center' }}>
-              This may take a few seconds.
+              Analyzing photo & description for better results
             </Text>
           </View>
         </View>
       )}
-
-      {/* Location Picker Modal */}
-      <LocationPickerModal
-        visible={showLocationPicker}
-        onClose={() => setShowLocationPicker(false)}
-        onLocationSelected={(location) => {
-          setSelectedLocation(location);
-          setUseCurrentLocation(false);
-        }}
-        currentLocation={currentLocation}
-      />
     </View>
   );
 } 

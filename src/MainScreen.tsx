@@ -12,13 +12,18 @@ import PlantSuggestionsView from './components/PlantSuggestionsView';
 
 // Import custom hooks
 import { useImageHandler } from './hooks/useImageHandler';
+import { useLocationHandler, LocationData } from './hooks/useLocationHandler';
 
 export default function MainScreen() {
     // State management - moved selectedPlantId before plantDetail query
-    const [loading, setLoading] = useState(false);
-    const [plant, setPlant] = useState<any>(null);
-    const [currentView, setCurrentView] = useState<'identify' | 'collection' | 'detail'>('identify');
     const [selectedPlantId, setSelectedPlantId] = useState<string | null>(null);
+    const [currentView, setCurrentView] = useState<'identify' | 'collection' | 'detail'>('identify');
+    const [loading, setLoading] = useState(false);
+    const [deletingPlant, setDeletingPlant] = useState(false);
+    const [deletingSighting, setDeletingSighting] = useState(false);
+    const [settingDefaultPhoto, setSettingDefaultPhoto] = useState(false);
+    const [aiLoading, setAiLoading] = useState(false); // Separate loading state for AI requests
+    const [plant, setPlant] = useState<any>(null);
     const [zoomedImage, setZoomedImage] = useState<string | null>(null);
     const [adminMode, setAdminMode] = useState(false);
     const [adminTapCount, setAdminTapCount] = useState(0);
@@ -26,6 +31,10 @@ export default function MainScreen() {
     const [capturedPhotos, setCapturedPhotos] = useState<string[]>([]);
     const [multiPhotoMode, setMultiPhotoMode] = useState(false);
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
+    
+    // Location state
+    const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(null);
+    const [useCurrentLocation, setUseCurrentLocation] = useState<boolean>(true); // Auto-enable GPS
     
     // Editing states
     const [isEditingTraditionalUsage, setIsEditingTraditionalUsage] = useState(false);
@@ -52,11 +61,42 @@ export default function MainScreen() {
     const deletePlantAction = useAction(api.identifyPlant.adminDeletePlant);
     const deleteSightingAction = useAction(api.identifyPlant.adminDeleteSighting);
     const setDefaultPhotoAction = useAction(api.identifyPlant.setDefaultPhoto);
+    const setDefaultDatabaseImageAction = useAction(api.identifyPlant.setDefaultDatabaseImage);
     const updateTraditionalUsage = useAction(api.identifyPlant.updateTraditionalUsage);
     const updatePlantTags = useAction(api.identifyPlant.updatePlantTags);
     const plants = useQuery(api.identifyPlant.getAllPlants);
     const recentPlants = useQuery(api.identifyPlant.getRecentlyIdentified, { limit: 5 });
-    
+
+    // Location handler
+    const { currentLocation, getCurrentLocation, requestLocationPermission } = useLocationHandler();
+
+    // Auto-enable GPS on app start
+    React.useEffect(() => {
+        const initializeLocation = async () => {
+            try {
+                console.log('🌍 Auto-requesting GPS permissions on app start...');
+                const hasPermission = await requestLocationPermission();
+                if (hasPermission) {
+                    console.log('✅ GPS permissions granted, attempting to get current location...');
+                    const location = await getCurrentLocation();
+                    if (location) {
+                        console.log('📍 Auto-enabled GPS location:', location.latitude, location.longitude);
+                        setSelectedLocation(location);
+                        setUseCurrentLocation(true);
+                    }
+                } else {
+                    console.log('❌ GPS permissions not granted');
+                    setUseCurrentLocation(false);
+                }
+            } catch (error) {
+                console.error('Failed to auto-enable GPS:', error);
+                setUseCurrentLocation(false);
+            }
+        };
+        
+        initializeLocation();
+    }, []);
+
     // Get detailed plant data when viewing detail
     const plantDetail = useQuery(api.identifyPlant.getPlantById, selectedPlantId ? { plantId: selectedPlantId as any } : "skip");
     const plantFeedback = useQuery(api.identifyPlant.getPlantFeedback, selectedPlantId ? { plantId: selectedPlantId as any } : "skip");
@@ -66,6 +106,14 @@ export default function MainScreen() {
 
     // Custom hooks
     const { compressImage, requestPermissions, launchCamera, launchImageLibrary, showImageSourceAlert } = useImageHandler();
+
+    // Helper function to get current location data
+    const getCurrentLocationData = (): LocationData | null => {
+        // Return selectedLocation which contains either:
+        // - GPS location (when useCurrentLocation=true and GPS button was clicked)
+        // - Map-selected location (when user picked location on map)
+        return selectedLocation;
+    };
 
     // Helper functions
     const getAllUniqueTags = () => {
@@ -105,25 +153,31 @@ Collected with AncesTree 🌿📱`;
             const permissions = await requestPermissions();
             if (!permissions.camera && !permissions.media) return;
             
-            let result = null;
-            
-            if (permissions.camera) {
-                result = await launchCamera();
-            }
-            
-            if (!result || result.canceled) {
-                showImageSourceAlert(async () => {
-                    const libraryResult = await launchImageLibrary();
-                    if (libraryResult && !libraryResult.canceled) {
-                        await processPhoto(libraryResult.assets[0]);
+            // Show choice dialog upfront
+            showImageSourceAlert(
+                // Camera option
+                async () => {
+                    if (!permissions.camera) {
+                        Alert.alert("Camera Not Available", "Camera permission is required to take photos.");
+                        return;
                     }
-                });
-                return;
-            }
-            
-            if (result && !result.canceled) {
-                await processPhoto(result.assets[0]);
-            }
+                    const result = await launchCamera();
+                    if (result && !result.canceled) {
+                        await processPhoto(result.assets[0]);
+                    }
+                },
+                // Library option  
+                async () => {
+                    if (!permissions.media) {
+                        Alert.alert("Library Not Available", "Photo library permission is required to select photos.");
+                        return;
+                    }
+                    const result = await launchImageLibrary();
+                    if (result && !result.canceled) {
+                        await processPhoto(result.assets[0]);
+                    }
+                }
+            );
         } catch (error) {
             console.error("Error with photo picker:", error);
             Alert.alert("Error", "Unable to access photo picker.");
@@ -135,25 +189,26 @@ Collected with AncesTree 🌿📱`;
         try {
             if (!photo.uri) throw new Error("Failed to get image");
             
-            const { base64, compressedUri } = await compressImage(photo.uri);
+            const imageResult = await compressImage(photo.uri);
+            const { base64, location } = imageResult;
+            
             setCurrentPhotoBase64(base64); // Store for later use
             setCurrentCapturedPhotos([]); // Clear multi-photo state for single photo mode
             
-            const res = await identify({ base64 });
+            // Identify the plant
+            const result = await identify({ base64 });
             
-            console.log("🌿 Identified plants:", res.suggestions.length);
+            console.log('🌿 Identified plants:', result.suggestions.length);
             
-            // Always show suggestions view if we have any results
-            if (res.suggestions && res.suggestions.length > 0) {
-                setPlantSuggestions(res.suggestions);
+            if (result.suggestions && result.suggestions.length > 0) {
+                setPlantSuggestions(result.suggestions);
                 setShowSuggestions(true);
-                setPlant(null); // Clear single plant result
             } else {
-                throw new Error("No plant match found");
+                Alert.alert('Plant Not Found', 'I could not identify this plant. Try taking another photo with better lighting and focus.');
             }
-        } catch (err) {
-            console.error("Error identifying plant:", err);
-            Alert.alert("Error", "Failed to identify plant. Please try again.");
+        } catch (error) {
+            console.error('Error processing photo:', error);
+            Alert.alert('Error', 'Failed to identify plant');
         } finally {
             setLoading(false);
         }
@@ -164,25 +219,31 @@ Collected with AncesTree 🌿📱`;
             const permissions = await requestPermissions();
             if (!permissions.camera && !permissions.media) return;
             
-            let result = null;
-            
-            if (permissions.camera) {
-                result = await launchCamera();
-            }
-            
-            if (!result || result.canceled) {
-                showImageSourceAlert(async () => {
-                    const libraryResult = await launchImageLibrary();
-                    if (libraryResult && !libraryResult.canceled) {
-                        await processPhotoForCapture(libraryResult.assets[0]);
+            // Show choice dialog upfront
+            showImageSourceAlert(
+                // Camera option
+                async () => {
+                    if (!permissions.camera) {
+                        Alert.alert("Camera Not Available", "Camera permission is required to take photos.");
+                        return;
                     }
-                });
-                return;
-            }
-            
-            if (result && !result.canceled) {
-                await processPhotoForCapture(result.assets[0]);
-            }
+                    const result = await launchCamera();
+                    if (result && !result.canceled) {
+                        await processPhotoForCapture(result.assets[0]);
+                    }
+                },
+                // Library option
+                async () => {
+                    if (!permissions.media) {
+                        Alert.alert("Library Not Available", "Photo library permission is required to select photos.");
+                        return;
+                    }
+                    const result = await launchImageLibrary();
+                    if (result && !result.canceled) {
+                        await processPhotoForCapture(result.assets[0]);
+                    }
+                }
+            );
         } catch (error) {
             console.error("Error with photo picker:", error);
             Alert.alert("Error", "Unable to access photo picker.");
@@ -193,12 +254,19 @@ Collected with AncesTree 🌿📱`;
         try {
             if (!photo.uri) throw new Error("Failed to get image");
             
-            const { base64 } = await compressImage(photo.uri);
+            const imageResult = await compressImage(photo.uri);
+            const { base64, location } = imageResult;
+            
             setCapturedPhotos(prev => [...prev, base64]);
+            
+            // Show location info if found in any photo
+            const locationMessage = location 
+                ? `\n\n📍 GPS coordinates found in this photo: ${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}`
+                : '';
             
             Alert.alert(
                 "Photo Added!", 
-                `Photo ${capturedPhotos.length + 1} captured successfully!\n\nYou can add more photos of different angles, leaves, flowers, etc. for better identification accuracy.`,
+                `Photo ${capturedPhotos.length + 1} captured successfully!\n\nYou can add more photos of different angles, leaves, flowers, etc. for better identification accuracy.${locationMessage}`,
                 [{ text: "OK" }]
             );
         } catch (err) {
@@ -265,25 +333,31 @@ Collected with AncesTree 🌿📱`;
             const permissions = await requestPermissions();
             if (!permissions.camera && !permissions.media) return;
             
-            let result = null;
-            
-            if (permissions.camera) {
-                result = await launchCamera();
-            }
-            
-            if (!result || result.canceled) {
-                showImageSourceAlert(async () => {
-                    const libraryResult = await launchImageLibrary();
-                    if (libraryResult && !libraryResult.canceled) {
-                        await processAddPhoto(libraryResult.assets[0]);
+            // Show choice dialog upfront
+            showImageSourceAlert(
+                // Camera option
+                async () => {
+                    if (!permissions.camera) {
+                        Alert.alert("Camera Not Available", "Camera permission is required to take photos.");
+                        return;
                     }
-                });
-                return;
-            }
-            
-            if (result && !result.canceled) {
-                await processAddPhoto(result.assets[0]);
-            }
+                    const result = await launchCamera();
+                    if (result && !result.canceled) {
+                        await processAddPhoto(result.assets[0]);
+                    }
+                },
+                // Library option
+                async () => {
+                    if (!permissions.media) {
+                        Alert.alert("Library Not Available", "Photo library permission is required to select photos.");
+                        return;
+                    }
+                    const result = await launchImageLibrary();
+                    if (result && !result.canceled) {
+                        await processAddPhoto(result.assets[0]);
+                    }
+                }
+            );
         } catch (err) {
             console.error("Error with photo picker:", err);
             Alert.alert("Error", "Unable to access photo picker.");
@@ -296,7 +370,13 @@ Collected with AncesTree 🌿📱`;
             if (!photo.uri) throw new Error("Failed to get image");
             if (!plantDetail || 'error' in plantDetail) throw new Error("No plant selected or plant error");
             
-            const { base64 } = await compressImage(photo.uri);
+            const imageResult = await compressImage(photo.uri);
+            const { base64, location } = imageResult;
+            
+            // Show location info if found
+            if (location) {
+                console.log(`📍 GPS coordinates found in added photo: ${location.latitude}, ${location.longitude}`);
+            }
             
             await addPhotoDirectly({ 
                 plantId: plantDetail._id, 
@@ -329,7 +409,7 @@ Collected with AncesTree 🌿📱`;
                     text: "Delete",
                     style: "destructive",
                     onPress: async () => {
-                        setLoading(true);
+                        setDeletingPlant(true);
                         try {
                             await deletePlantAction({ plantId });
                             setSelectedPlantId(null);
@@ -340,7 +420,7 @@ Collected with AncesTree 🌿📱`;
                             Alert.alert('❌ Error', 'Failed to delete plant');
                             console.error('Delete error:', error);
                         } finally {
-                            setLoading(false);
+                            setDeletingPlant(false);
                         }
                     }
                 }
@@ -358,7 +438,7 @@ Collected with AncesTree 🌿📱`;
                     text: "Delete",
                     style: "destructive",
                     onPress: async () => {
-                        setLoading(true);
+                        setDeletingSighting(true);
                         try {
                             await deleteSightingAction({ sightingId });
                             
@@ -374,7 +454,7 @@ Collected with AncesTree 🌿📱`;
                             Alert.alert('❌ Error', 'Failed to delete photo');
                             console.error('Delete error:', error);
                         } finally {
-                            setLoading(false);
+                            setDeletingSighting(false);
                         }
                     }
                 }
@@ -383,31 +463,74 @@ Collected with AncesTree 🌿📱`;
     };
 
     const handleSetDefaultPhoto = async (sightingId: any) => {
-        setLoading(true);
+        if (!selectedPlantId) return;
+        
         try {
-            if (!plantDetail || 'error' in plantDetail) {
-                throw new Error("No plant selected or plant error");
-            }
+            setSettingDefaultPhoto(true);
+            console.log(`🖼️ Starting set default photo process for sighting: ${sightingId}`);
+            console.log(`🌿 Plant ID: ${selectedPlantId}`);
             
-            await setDefaultPhotoAction({ 
-                plantId: plantDetail._id, 
-                sightingId 
+            const result = await setDefaultPhotoAction({
+                plantId: selectedPlantId as any,
+                sightingId: sightingId,
             });
             
-            // Refresh the plant detail view to show new order
-            const currentPlantId = plantDetail._id;
-            setSelectedPlantId(null);
-            setTimeout(() => {
-                setSelectedPlantId(currentPlantId);
-            }, 100);
-            
-            Alert.alert("✅ Success", "Photo set as default reference!");
-            
+            if (result.success) {
+                console.log('✅ Default photo set successfully, starting refresh...');
+                
+                // Force refresh plant data
+                const currentId = selectedPlantId;
+                console.log(`🔄 Refreshing plant data: clearing selectedPlantId`);
+                setSelectedPlantId(null);
+                await new Promise(resolve => setTimeout(resolve, 200)); // Increased delay
+                console.log(`🔄 Refreshing plant data: setting selectedPlantId back to ${currentId}`);
+                setSelectedPlantId(currentId);
+                console.log(`✅ Plant data refresh complete`);
+            } else {
+                console.error('❌ Failed to set default photo:', result);
+                Alert.alert('Error', 'Failed to set default photo');
+            }
         } catch (error) {
-            Alert.alert('❌ Error', 'Failed to set default photo');
-            console.error('Set default error:', error);
+            console.error('❌ Error setting default photo:', error);
+            Alert.alert('Error', 'Failed to set default photo');
         } finally {
-            setLoading(false);
+            setSettingDefaultPhoto(false);
+        }
+    };
+
+    // Handle setting database image as default photo
+    const handleSetDefaultDatabaseImage = async (imageUrl: string, plantId: string) => {
+        try {
+            setSettingDefaultPhoto(true);
+            console.log('🖼️ Starting set database image as default process');
+            console.log('📸 Image URL:', imageUrl);
+            console.log('🌿 Plant ID:', plantId);
+            
+            const result = await setDefaultDatabaseImageAction({
+                plantId: plantId as any,
+                imageUrl: imageUrl,
+            });
+            
+            if (result.success) {
+                console.log('✅ Database image set as default successfully, starting refresh...');
+                
+                // Force refresh plant data
+                const currentId = selectedPlantId;
+                console.log(`🔄 Refreshing plant data: clearing selectedPlantId`);
+                setSelectedPlantId(null);
+                await new Promise(resolve => setTimeout(resolve, 200)); // Increased delay
+                console.log(`🔄 Refreshing plant data: setting selectedPlantId back to ${currentId}`);
+                setSelectedPlantId(currentId);
+                console.log(`✅ Plant data refresh complete`);
+            } else {
+                console.error('❌ Failed to set database image as default:', result);
+                Alert.alert('Error', 'Failed to set database image as default photo');
+            }
+        } catch (error) {
+            console.error('❌ Error setting database image as default:', error);
+            Alert.alert('Error', 'Failed to set database image as default photo');
+        } finally {
+            setSettingDefaultPhoto(false);
         }
     };
 
@@ -468,33 +591,18 @@ Collected with AncesTree 🌿📱`;
         if (newCount >= 3) {
             setAdminMode(!adminMode);
             setAdminTapCount(0);
-            Alert.alert(
-                adminMode ? "🔒 Admin Mode Disabled" : "🔧 Admin Mode Enabled", 
-                adminMode 
-                    ? "Delete buttons are now hidden for safety." 
-                    : "⚠️ DANGER ZONE ACTIVE!\n\nDelete buttons are now visible. You can permanently remove plant species from your collection.\n\nThis feature is intended for database management.",
-                [{ text: "OK" }]
-            );
         } else {
-            if (newCount === 1) {
-                setTimeout(() => {
-                    if (adminTapCount > 0) {
-                        Alert.alert(
-                            "🔧 Admin Mode", 
-                            "Triple-tap the ⚙️ button to access admin features.\n\nThis prevents accidental activation of delete functions.",
-                            [{ text: "Got it!" }]
-                        );
-                    }
-                }, 1500);
-            }
             setTimeout(() => setAdminTapCount(0), 2000);
         }
     };
 
     // Handler for when user selects a plant from suggestions
-    const handlePlantSelection = async (selectedSuggestion: any, feedback?: string) => {
+    const handlePlantSelection = async (selectedSuggestion: any, feedback?: string, location?: LocationData | null) => {
         setLoading(true);
         try {
+            // Use the location passed from PlantSuggestionsView, fallback to getCurrentLocationData() if not provided
+            const locationToUse = location || getCurrentLocationData();
+            
             // Determine if this was from multi-photo mode and pass all photos
             const isFromMultiPhoto = currentCapturedPhotos.length > 0;
             
@@ -510,33 +618,39 @@ Collected with AncesTree 🌿📱`;
                 userPhotoBase64: isFromMultiPhoto ? undefined : currentPhotoBase64, // Use single photo for single-photo mode
                 userPhotos: isFromMultiPhoto ? currentCapturedPhotos : undefined, // Use all photos for multi-photo mode
                 userFeedback: feedback,
+                location: locationToUse || undefined, // Pass the location data, converting null to undefined
             });
 
             console.log("✅ Plant confirmed and added:", result.scientificName);
             console.log(`📸 Saved ${isFromMultiPhoto ? currentCapturedPhotos.length : 1} user photos`);
+            console.log(`📍 Location: ${locationToUse ? `${locationToUse.latitude}, ${locationToUse.longitude}` : 'None'}`);
             console.log(`🗂️ Saved ${selectedSuggestion.similar_images?.length || 0} preview images to database for future reference`);
             
-            // Clean up suggestions state
+            // Clean up suggestions state first
             setShowSuggestions(false);
             setPlantSuggestions([]);
             setCurrentPhotoBase64('');
             setCurrentCapturedPhotos([]); // Clear multi-photo state
             
-            // Navigate directly to the new plant's profile (no alert)
-            setSelectedPlantId(result.plantId);
-            setCurrentView('detail');
+            // Complete loading before navigating
+            setLoading(false);
+            
+            // Small delay to ensure state is updated, then navigate
+            setTimeout(() => {
+                setSelectedPlantId(result.plantId);
+                setCurrentView('detail');
+            }, 100);
             
         } catch (err) {
             console.error("Error confirming plant selection:", err);
             Alert.alert("Error", "Failed to add plant to collection. Please try again.");
-        } finally {
             setLoading(false);
         }
     };
 
     // Handler for requesting better AI identification
     const handleRequestBetterIdentification = async (userDescription: string, rejectedSuggestions: string[]) => {
-        setLoading(true);
+        setAiLoading(true); // Use separate AI loading state
         try {
             const result = await requestBetterIdentification({
                 base64: currentPhotoBase64,
@@ -560,7 +674,7 @@ Collected with AncesTree 🌿📱`;
             console.error("Error requesting better identification:", err);
             Alert.alert("Error", "Failed to get AI suggestions. Please try again.");
         } finally {
-            setLoading(false);
+            setAiLoading(false); // Reset AI loading state
         }
     };
 
@@ -619,156 +733,194 @@ Collected with AncesTree 🌿📱`;
     };
 
     return (
-        <ScrollView contentContainerStyle={{ 
-            flexGrow: 1, 
-            backgroundColor: '#f0fdf4', 
-            paddingHorizontal: 24, 
-            paddingTop: 60,
-            paddingBottom: 40, 
-            alignItems: 'center' 
-        }}>
-            {/* Navigation Tabs */}
-            <View style={{ flexDirection: 'row', marginBottom: 32, backgroundColor: 'white', borderRadius: 12, padding: 4 }}>
-                <TouchableOpacity
-                    style={{
-                        paddingHorizontal: 20,
-                        paddingVertical: 12,
-                        borderRadius: 8,
-                        backgroundColor: currentView === 'identify' ? '#059669' : 'transparent'
-                    }}
-                    onPress={() => setCurrentView('identify')}
-                >
-                    <Text style={{ color: currentView === 'identify' ? 'white' : '#059669', fontWeight: '600' }}>
-                        📸 Identify
-                    </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={{
-                        paddingHorizontal: 20,
-                        paddingVertical: 12,
-                        borderRadius: 8,
-                        backgroundColor: currentView === 'collection' ? '#059669' : 'transparent'
-                    }}
-                    onPress={() => setCurrentView('collection')}
-                >
-                    <Text style={{ color: currentView === 'collection' ? 'white' : '#059669', fontWeight: '600' }}>
-                        🌿 Collection ({plants?.length || 0})
-                        {plants && plants.some(p => p.latestUserPhoto) && ' 📸'}
-                    </Text>
-                </TouchableOpacity>
-                
-                {/* Admin Mode Toggle */}
-                <TouchableOpacity
-                    style={{
-                        paddingHorizontal: 8,
-                        paddingVertical: 12,
-                        borderRadius: 8,
-                        backgroundColor: adminMode ? '#dc2626' : 'transparent'
-                    }}
-                    onPress={handleAdminToggle}
-                >
-                    <Text style={{ color: adminMode ? 'white' : '#6b7280', fontSize: 12 }}>
-                        {adminMode ? '🔧 ADMIN' : adminTapCount > 0 ? `⚙️ ${adminTapCount}/3` : '⚙️'}
-                    </Text>
-                </TouchableOpacity>
+        <View style={{ flex: 1, backgroundColor: '#f0fdf4' }}>
+            {/* Sticky Navigation Tabs */}
+            <View style={{ 
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                zIndex: 1000,
+                backgroundColor: '#f0fdf4',
+                paddingTop: 60,
+                paddingBottom: 16,
+                alignItems: 'center' // Center the container
+            }}>
+                <View style={{ 
+                    flexDirection: 'row', 
+                    backgroundColor: 'white', 
+                    borderRadius: 12, 
+                    padding: 4,
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.1,
+                    shadowRadius: 4,
+                    elevation: 3,
+                    width: 'auto', // Let it adjust to content
+                    minWidth: 280, // Minimum width to ensure buttons don't get too cramped
+                    maxWidth: 400 // Maximum width to maintain a good look
+                }}>
+                    <TouchableOpacity
+                        style={{
+                            paddingHorizontal: 20,
+                            paddingVertical: 12,
+                            borderRadius: 8,
+                            backgroundColor: currentView === 'identify' ? '#059669' : 'transparent'
+                        }}
+                        onPress={() => setCurrentView('identify')}
+                    >
+                        <Text style={{ color: currentView === 'identify' ? 'white' : '#059669', fontWeight: '600' }}>
+                            📸 Identify
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={{
+                            paddingHorizontal: 20,
+                            paddingVertical: 12,
+                            borderRadius: 8,
+                            backgroundColor: currentView === 'collection' ? '#059669' : 'transparent'
+                        }}
+                        onPress={() => setCurrentView('collection')}
+                    >
+                        <Text style={{ color: currentView === 'collection' ? 'white' : '#059669', fontWeight: '600' }}>
+                            🌿 Collection ({plants?.length || 0})
+                            {plants && plants.some(p => p.latestUserPhoto) && ' 📸'}
+                        </Text>
+                    </TouchableOpacity>
+                    
+                    {/* Admin Mode Toggle */}
+                    <TouchableOpacity
+                        style={{
+                            paddingHorizontal: 8,
+                            paddingVertical: 12,
+                            borderRadius: 8,
+                            backgroundColor: adminMode ? '#dc2626' : 'transparent'
+                        }}
+                        onPress={handleAdminToggle}
+                    >
+                        <Text style={{ color: adminMode ? 'white' : '#6b7280', fontSize: 12 }}>
+                            {adminMode ? '🔧 ADMIN' : adminTapCount > 0 ? `⚙️ ${adminTapCount}/3` : '⚙️'}
+                        </Text>
+                    </TouchableOpacity>
+                </View>
             </View>
 
-            {/* Render appropriate view */}
-            {currentView === 'identify' && showSuggestions && (
-                <PlantSuggestionsView
-                    suggestions={plantSuggestions}
-                    userPhotoBase64={currentPhotoBase64}
-                    onPlantSelected={handlePlantSelection}
-                    onRequestBetterIdentification={handleRequestBetterIdentification}
-                    onBackToCamera={() => {
-                        setShowSuggestions(false);
-                        setPlantSuggestions([]);
-                        setCurrentPhotoBase64('');
-                        setPlant(null);
-                    }}
-                    onRejectionFeedback={handleRejectionFeedback}
-                    loading={loading}
-                />
-            )}
+            <ScrollView 
+                contentContainerStyle={{ 
+                    flexGrow: 1, 
+                    backgroundColor: '#f0fdf4', 
+                    paddingHorizontal: 24, 
+                    paddingTop: 140, // Increased to account for sticky header
+                    paddingBottom: 40, 
+                    alignItems: 'center' 
+                }}
+            >
+                {/* Render appropriate view */}
+                {currentView === 'identify' && showSuggestions && (
+                    <PlantSuggestionsView
+                        suggestions={plantSuggestions}
+                        userPhotoBase64={currentPhotoBase64}
+                        onPlantSelected={handlePlantSelection}
+                        onRequestBetterIdentification={handleRequestBetterIdentification}
+                        onBackToCamera={() => {
+                            setShowSuggestions(false);
+                            setPlantSuggestions([]);
+                            setCurrentPhotoBase64('');
+                            setPlant(null);
+                        }}
+                        onRejectionFeedback={handleRejectionFeedback}
+                        loading={aiLoading}
+                        selectedLocation={selectedLocation}
+                    />
+                )}
 
-            {currentView === 'identify' && !showSuggestions && (
-                <PlantIdentificationView
-                    loading={loading}
-                    plant={plant}
-                    multiPhotoMode={multiPhotoMode}
-                    capturedPhotos={capturedPhotos}
-                    showRecentPlants={showRecentPlants}
-                    recentPlants={recentPlants || []}
-                    plants={plants}
-                    setMultiPhotoMode={setMultiPhotoMode}
-                    setCapturedPhotos={setCapturedPhotos}
-                    setShowRecentPlants={setShowRecentPlants}
-                    setSelectedPlantId={setSelectedPlantId}
-                    setCurrentView={setCurrentView}
-                    setZoomedImage={setZoomedImage}
-                    takePhoto={takePhoto}
-                    addPhotoToCapture={addPhotoToCapture}
-                    processMultiplePhotos={processMultiplePhotos}
-                    clearCapturedPhotos={clearCapturedPhotos}
-                    copyPlantInfo={copyPlantInfo}
-                />
-            )}
+                {currentView === 'identify' && !showSuggestions && (
+                    <PlantIdentificationView
+                        loading={loading}
+                        plant={plant}
+                        multiPhotoMode={multiPhotoMode}
+                        capturedPhotos={capturedPhotos}
+                        showRecentPlants={showRecentPlants}
+                        recentPlants={recentPlants || []}
+                        plants={plants}
+                        setMultiPhotoMode={setMultiPhotoMode}
+                        setCapturedPhotos={setCapturedPhotos}
+                        setShowRecentPlants={setShowRecentPlants}
+                        setSelectedPlantId={setSelectedPlantId}
+                        setCurrentView={setCurrentView}
+                        setZoomedImage={setZoomedImage}
+                        takePhoto={takePhoto}
+                        addPhotoToCapture={addPhotoToCapture}
+                        processMultiplePhotos={processMultiplePhotos}
+                        clearCapturedPhotos={clearCapturedPhotos}
+                        copyPlantInfo={copyPlantInfo}
+                        selectedLocation={selectedLocation}
+                        setSelectedLocation={setSelectedLocation}
+                        useCurrentLocation={useCurrentLocation}
+                        setUseCurrentLocation={setUseCurrentLocation}
+                    />
+                )}
 
-            {currentView === 'collection' && (
-                <PlantCollectionView
-                    plants={plants}
-                    selectedTags={selectedTags}
-                    adminMode={adminMode}
-                    setSelectedTags={setSelectedTags}
-                    setSelectedPlantId={setSelectedPlantId}
-                    setCurrentView={setCurrentView}
-                    handleDeletePlant={handleDeletePlant}
-                    getAllUniqueTags={getAllUniqueTags}
-                />
-            )}
+                {currentView === 'collection' && (
+                    <PlantCollectionView
+                        plants={plants}
+                        selectedTags={selectedTags}
+                        adminMode={adminMode}
+                        setSelectedTags={setSelectedTags}
+                        setSelectedPlantId={setSelectedPlantId}
+                        setCurrentView={setCurrentView}
+                        handleDeletePlant={handleDeletePlant}
+                        getAllUniqueTags={getAllUniqueTags}
+                    />
+                )}
 
-            {currentView === 'detail' && selectedPlantId && (
-                <PlantDetailView
-                    selectedPlantId={selectedPlantId}
-                    plantDetail={plantDetail}
-                    plantFeedback={plantFeedback}
-                    loading={loading}
-                    isEditingTraditionalUsage={isEditingTraditionalUsage}
-                    editedTraditionalUsage={editedTraditionalUsage}
-                    isEditingTags={isEditingTags}
-                    editedTags={editedTags}
-                    editPreviewMode={editPreviewMode}
-                    textSelection={textSelection}
-                    showSafetyInfo={showSafetyInfo}
-                    adminMode={adminMode}
-                    setCurrentView={setCurrentView}
-                    setIsEditingTraditionalUsage={setIsEditingTraditionalUsage}
-                    setEditedTraditionalUsage={setEditedTraditionalUsage}
-                    setIsEditingTags={setIsEditingTags}
-                    setEditedTags={setEditedTags}
-                    setEditPreviewMode={setEditPreviewMode}
-                    setTextSelection={setTextSelection}
-                    setShowSafetyInfo={setShowSafetyInfo}
-                    setZoomedImage={setZoomedImage}
-                    handleSaveTraditionalUsage={handleSaveTraditionalUsage}
-                    handleSaveTags={handleSaveTags}
-                    insertOrWrapText={insertOrWrapText}
-                    copyPlantInfo={copyPlantInfo}
-                    addPhotoToPlant={addPhotoToPlant}
-                    handleDeleteSighting={handleDeleteSighting}
-                    handleSetDefaultPhoto={handleSetDefaultPhoto}
-                    updatePlantFeedback={editPlantFeedback}
-                    addPlantFeedback={addPlantFeedback}
-                    refreshPlantData={refreshPlantData}
-                />
-            )}
+                {currentView === 'detail' && selectedPlantId && (
+                    <PlantDetailView
+                        selectedPlantId={selectedPlantId}
+                        plantDetail={plantDetail}
+                        plantFeedback={plantFeedback}
+                        loading={loading}
+                        deletingPlant={deletingPlant}
+                        deletingSighting={deletingSighting}
+                        settingDefaultPhoto={settingDefaultPhoto}
+                        isEditingTraditionalUsage={isEditingTraditionalUsage}
+                        editedTraditionalUsage={editedTraditionalUsage}
+                        isEditingTags={isEditingTags}
+                        editedTags={editedTags}
+                        editPreviewMode={editPreviewMode}
+                        textSelection={textSelection}
+                        showSafetyInfo={showSafetyInfo}
+                        adminMode={adminMode}
+                        setCurrentView={setCurrentView}
+                        setIsEditingTraditionalUsage={setIsEditingTraditionalUsage}
+                        setEditedTraditionalUsage={setEditedTraditionalUsage}
+                        setIsEditingTags={setIsEditingTags}
+                        setEditedTags={setEditedTags}
+                        setEditPreviewMode={setEditPreviewMode}
+                        setTextSelection={setTextSelection}
+                        setShowSafetyInfo={setShowSafetyInfo}
+                        setZoomedImage={setZoomedImage}
+                        handleSaveTraditionalUsage={handleSaveTraditionalUsage}
+                        handleSaveTags={handleSaveTags}
+                        insertOrWrapText={insertOrWrapText}
+                        copyPlantInfo={copyPlantInfo}
+                        addPhotoToPlant={addPhotoToPlant}
+                        handleDeleteSighting={handleDeleteSighting}
+                        handleSetDefaultPhoto={handleSetDefaultPhoto}
+                        handleSetDefaultDatabaseImage={handleSetDefaultDatabaseImage}
+                        updatePlantFeedback={editPlantFeedback}
+                        addPlantFeedback={addPlantFeedback}
+                        refreshPlantData={refreshPlantData}
+                    />
+                )}
 
-            {/* Zoom Modal */}
-            <ZoomModal
-                visible={!!zoomedImage}
-                imageUri={zoomedImage}
-                onClose={() => setZoomedImage(null)}
-            />
-        </ScrollView>
+                {/* Zoom Modal */}
+                <ZoomModal
+                    visible={!!zoomedImage}
+                    imageUri={zoomedImage}
+                    onClose={() => setZoomedImage(null)}
+                />
+            </ScrollView>
+        </View>
     );
 }

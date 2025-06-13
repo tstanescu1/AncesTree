@@ -493,7 +493,7 @@ async function fetchPlantImageFromWeb(scientificName: string): Promise<string> {
       try {
         const imageUrl = await fetchFunction();
         if (imageUrl) {
-          console.log(`✅ Found image from source: ${imageUrl}`);
+          // console.log(`✅ Found image from source: ${imageUrl}`);
           return imageUrl;
         }
       } catch (error) {
@@ -530,7 +530,7 @@ async function fetchMultiplePlantImages(scientificName: string): Promise<string[
     results.forEach((result, index) => {
       if (result.status === 'fulfilled' && result.value) {
         images.push(result.value);
-        console.log(`✅ Found image from source ${index + 1}: ${result.value}`);
+        // console.log(`✅ Found image from source ${index + 1}: ${result.value}`);
       }
     });
 
@@ -719,9 +719,16 @@ export const confirmPlantSelection = action({
     userPhotoBase64: v.optional(v.string()),
     userPhotos: v.optional(v.array(v.string())),
     userFeedback: v.optional(v.string()),
+    location: v.optional(v.object({
+      latitude: v.number(),
+      longitude: v.number(),
+      address: v.optional(v.string()),
+      accuracy: v.optional(v.number()),
+      timestamp: v.optional(v.number()),
+    })),
   },
 
-  handler: async (ctx, { selectedSuggestion, userPhotoBase64, userPhotos, userFeedback }): Promise<{
+  handler: async (ctx, { selectedSuggestion, userPhotoBase64, userPhotos, userFeedback, location }): Promise<{
     plantId: any;
     scientificName: string;
     commonNames: string[];
@@ -741,8 +748,9 @@ export const confirmPlantSelection = action({
     
     console.log(`📸 Saving ${photosToSave.length} user photos for ${scientificName}`);
     console.log(`🗂️ Also saving ${(similar_images || []).length} preview images + main image`);
+    console.log(`📍 Location data: ${location ? `${location.latitude}, ${location.longitude}` : 'None provided'}`);
 
-    // Store the confirmed plant data with preview images
+    // Store the confirmed plant data with preview images and location
     const result: {
       plantId: any;
       scientificName: string;
@@ -758,6 +766,7 @@ export const confirmPlantSelection = action({
       imageUrl,
       userPhotos: photosToSave,
       similar_images: similar_images || [],
+      location,
     });
 
     // Trigger GPT extraction for advanced fields
@@ -1090,21 +1099,30 @@ export const storePlantData = internalMutation({
     imageUrl: v.optional(v.string()),
     userPhotos: v.optional(v.array(v.string())),
     similar_images: v.optional(v.array(v.string())),
-    description: v.optional(v.string()), // Add description field
+    description: v.optional(v.string()),
+    location: v.optional(v.object({
+      latitude: v.number(),
+      longitude: v.number(),
+      address: v.string(),
+      accuracy: v.number(),
+      timestamp: v.number()
+    })),
+    pests: v.optional(v.array(v.string()))
   },
-  handler: async (ctx, { scientificName, commonNames, wikiUrl, medicinalTags, traditionalUsage, imageUrl, userPhotos, similar_images, description }) => {
+  handler: async (ctx, { scientificName, commonNames, wikiUrl, medicinalTags, traditionalUsage, imageUrl, userPhotos, similar_images, description, location, pests }) => {
     /* ---------- Upsert into `plants` ---------- */
-    let plantId: Id<"plants">;
-    
-    // Try to find existing plant
+    let plantId;
     const existingPlant = await ctx.db
       .query("plants")
-      .withIndex("scientificName", (q) => q.eq("scientificName", scientificName))
-      .unique();
+      .withIndex("scientificName", q => q.eq("scientificName", scientificName))
+      .first();
     
     if (existingPlant) {
       // Update existing plant
       plantId = existingPlant._id;
+      console.log('🔄 Updating existing plant:', scientificName);
+      console.log('🐛 Pests to update:', pests);
+      
       await ctx.db.patch(plantId, {
         commonNames,
         wikiUrl,
@@ -1112,6 +1130,7 @@ export const storePlantData = internalMutation({
         traditionalUsage,
         imageUrl,
         similar_images: similar_images || existingPlant.similar_images,
+        pests: pests || existingPlant.pests,
       });
     } else {
       // Create new plant with all preview images
@@ -1123,6 +1142,7 @@ export const storePlantData = internalMutation({
       console.log(`✨ Creating new plant: ${scientificName}`);
       console.log(`📊 Total images being saved: ${allImages.length}`);
       console.log(`🖼️ Images: ${allImages.slice(0, 3).join(', ')}${allImages.length > 3 ? '...' : ''}`);
+      console.log('🐛 Pests to save:', pests);
       
       // Extract advanced plant profile fields if description is available
       let advancedFields = {};
@@ -1145,21 +1165,30 @@ export const storePlantData = internalMutation({
         createdAt: Date.now(),
         similar_images: allImages,
         ...advancedFields, // Include the extracted advanced fields
+        pests: pests || [], // Ensure pests is always an array
       });
     }
 
-    /* ---------- Record sightings with all user photos ---------- */
+    /* ---------- Record sightings with all user photos and location ---------- */
     const photosToProcess = userPhotos && userPhotos.length > 0 ? userPhotos : [];
-    
-    console.log(`📸 Creating ${photosToProcess.length} sightings for user photos`);
-    
-    // Create a sighting for each user photo
-    for (const photo of photosToProcess) {
-      await ctx.db.insert("sightings", {
+    for (const photoUri of photosToProcess) {
+      const sightingData = {
         plantId,
-        photoUri: `data:image/jpeg;base64,${photo}`,
+        photoUri,
         identifiedAt: Date.now(),
-      });
+      };
+
+      if (location && typeof location.address === 'string' && typeof location.accuracy === 'number' && typeof location.timestamp === 'number') {
+        Object.assign(sightingData, {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          address: location.address,
+          accuracy: location.accuracy,
+          locationTimestamp: location.timestamp
+        });
+      }
+
+      await ctx.db.insert("sightings", sightingData);
     }
 
     return {
@@ -1181,7 +1210,7 @@ export const getAllPlants = query({
       .order("desc")
       .collect();
     
-    // For each plant, get the most recent user photo
+    // For each plant, get the most recent user photo and all sightings
     const plantsWithPhotos = await Promise.all(
       plants.map(async (plant) => {
         const latestSighting = await ctx.db
@@ -1190,16 +1219,18 @@ export const getAllPlants = query({
           .order("desc")
           .first();
         
-        const sightingsCount = await ctx.db
+        const allSightings = await ctx.db
           .query("sightings")
           .withIndex("plantId", (q) => q.eq("plantId", plant._id))
+          .order("desc")
           .collect();
         
         return {
           ...plant,
           latestUserPhoto: latestSighting?.photoUri || null,
-          sightingsCount: sightingsCount.length,
+          sightingsCount: allSightings.length,
           lastSeen: latestSighting?.identifiedAt,
+          allSightings: allSightings, // Include all sightings for location data
         };
       })
     );
@@ -1272,20 +1303,36 @@ export const deletePlant = internalMutation({
   args: { plantId: v.id("plants") },
   
   handler: async (ctx, { plantId }) => {
-    // First delete all sightings for this plant
-    const sightings = await ctx.db
-      .query("sightings")
-      .withIndex("plantId", (q) => q.eq("plantId", plantId))
-      .collect();
-    
-    for (const sighting of sightings) {
-      await ctx.db.delete(sighting._id);
+    try {
+      // Check if plant exists first
+      const plant = await ctx.db.get(plantId);
+      if (!plant) {
+        console.log(`Plant ${plantId} not found, skipping deletion`);
+        return { success: true, message: "Plant not found" };
+      }
+
+      // First delete all sightings for this plant
+      const sightings = await ctx.db
+        .query("sightings")
+        .withIndex("plantId", (q) => q.eq("plantId", plantId))
+        .collect();
+      
+      for (const sighting of sightings) {
+        try {
+          await ctx.db.delete(sighting._id);
+        } catch (error) {
+          console.log(`Sighting ${sighting._id} already deleted, skipping`);
+        }
+      }
+      
+      // Then delete the plant
+      await ctx.db.delete(plantId);
+      
+      return { success: true };
+    } catch (error) {
+      console.error("Error deleting plant:", error);
+      return { success: false, error: String(error) };
     }
-    
-    // Then delete the plant
-    await ctx.db.delete(plantId);
-    
-    return { success: true };
   },
 });
 
@@ -1293,8 +1340,20 @@ export const deleteSpecificSighting = internalMutation({
   args: { sightingId: v.id("sightings") },
   
   handler: async (ctx, { sightingId }) => {
-    await ctx.db.delete(sightingId);
-    return { success: true };
+    try {
+      // Check if sighting exists first
+      const sighting = await ctx.db.get(sightingId);
+      if (!sighting) {
+        console.log(`Sighting ${sightingId} not found, skipping deletion`);
+        return { success: true, message: "Sighting not found" };
+      }
+
+      await ctx.db.delete(sightingId);
+      return { success: true };
+    } catch (error) {
+      console.error("Error deleting sighting:", error);
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   },
 });
 
@@ -1313,15 +1372,31 @@ export const addPhotoToExistingPlant = action({
   args: {
     plantId: v.id("plants"),
     userPhotoBase64: v.string(),
+    location: v.optional(v.object({
+      latitude: v.number(),
+      longitude: v.number(),
+      address: v.optional(v.string()),
+      accuracy: v.optional(v.number()),
+      timestamp: v.optional(v.number()),
+    })),
   },
   
-  handler: async (ctx, { plantId, userPhotoBase64 }) => {
-    // Simply add a new sighting for this existing plant
-    await ctx.runMutation(internal.identifyPlant.addSightingToPlant, {
-      plantId,
-      userPhotoBase64,
+  handler: async (ctx, { plantId, userPhotoBase64, location }) => {
+    console.log('🔍 addPhotoToExistingPlant called with:', {
+      plantId: plantId,
+      hasPhoto: !!userPhotoBase64,
+      hasLocation: !!location,
+      location: location
     });
     
+    // Simply add a new sighting for this existing plant with location data
+    const result = await ctx.runMutation(internal.identifyPlant.addSightingToPlant, {
+      plantId,
+      userPhotoBase64,
+      location,
+    });
+    
+    console.log('✅ addPhotoToExistingPlant completed successfully');
     return { success: true };
   },
 });
@@ -1331,15 +1406,56 @@ export const addSightingToPlant = internalMutation({
   args: {
     plantId: v.id("plants"),
     userPhotoBase64: v.string(),
+    location: v.optional(v.object({
+      latitude: v.number(),
+      longitude: v.number(),
+      address: v.optional(v.string()),
+      accuracy: v.optional(v.number()),
+      timestamp: v.optional(v.number()),
+    })),
   },
   
-  handler: async (ctx, { plantId, userPhotoBase64 }) => {
-    // Record new sighting with user photo
-    await ctx.db.insert("sightings", {
+  handler: async (ctx, { plantId, userPhotoBase64, location }) => {
+    console.log('🔍 addSightingToPlant called with:', {
+      plantId: plantId,
+      hasPhoto: !!userPhotoBase64,
+      hasLocation: !!location,
+      location: location
+    });
+    
+    // Prepare the sighting data
+    const sightingData: any = {
       plantId,
       photoUri: `data:image/jpeg;base64,${userPhotoBase64}`,
       identifiedAt: Date.now(),
-    });
+    };
+    
+    // Include location data if provided
+    if (location) {
+      console.log('📍 Adding location data to sighting:', {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        address: location.address,
+        accuracy: location.accuracy,
+        locationTimestamp: location.timestamp,
+      });
+      
+      sightingData.latitude = location.latitude;
+      sightingData.longitude = location.longitude;
+      sightingData.address = location.address;
+      sightingData.accuracy = location.accuracy;
+      sightingData.locationTimestamp = location.timestamp;
+    } else {
+      console.log('⚠️ No location data provided to addSightingToPlant');
+    }
+    
+    console.log('💾 Final sighting data to be saved:', JSON.stringify(sightingData, null, 2));
+    
+    // Record new sighting with user photo and location data
+    const sightingId = await ctx.db.insert("sightings", sightingData);
+    
+    console.log(`✅ Sighting saved with ID: ${sightingId}`);
+    console.log(`📍 Added sighting with location: ${location ? `${location.latitude}, ${location.longitude}` : 'No location'}`);
     
     return { success: true };
   },
@@ -1958,6 +2074,21 @@ export const setDefaultPhoto = action({
   },
 });
 
+// Set database image as default photo
+export const setDefaultDatabaseImage = action({
+  args: {
+    plantId: v.id("plants"),
+    imageUrl: v.string(),
+  },
+  
+  handler: async (ctx, { plantId, imageUrl }): Promise<{ success: boolean }> => {
+    return await ctx.runMutation(internal.identifyPlant.setDefaultDatabaseImageInternal, {
+      plantId,
+      imageUrl,
+    });
+  },
+});
+
 // Internal mutation to reorder sightings to set default photo
 export const setDefaultPhotoInternal = internalMutation({
   args: {
@@ -1966,30 +2097,100 @@ export const setDefaultPhotoInternal = internalMutation({
   },
   
   handler: async (ctx, { plantId, sightingId }): Promise<{ success: boolean }> => {
-    // Get all sightings for this plant
-    const allSightings = await ctx.db
-      .query("sightings")
-      .withIndex("plantId", (q) => q.eq("plantId", plantId))
-      .order("desc") // Get in reverse chronological order (newest first)
-      .collect();
-    
-    // Find the target sighting
-    const targetSighting = await ctx.db.get(sightingId);
-    if (!targetSighting) {
-      throw new Error("Sighting not found");
+    try {
+      // Get all sightings for this plant ordered by identifiedAt (newest first)
+      const allSightings = await ctx.db
+        .query("sightings")
+        .withIndex("plantId", (q) => q.eq("plantId", plantId))
+        .order("desc")
+        .collect();
+      
+      // Find the target sighting
+      const targetSighting = await ctx.db.get(sightingId);
+      if (!targetSighting) {
+        throw new Error("Sighting not found");
+      }
+      
+      // Create a timestamp that's newer than all existing ones to make it first
+      const newestTimestamp = Math.max(...allSightings.map(s => s.identifiedAt)) + 1000; // Add 1000ms buffer
+      
+      console.log(`📸 Setting new default photo for plant ${plantId}`);
+      console.log(`🔄 Target sighting ${sightingId} - Old timestamp: ${targetSighting.identifiedAt}, New timestamp: ${newestTimestamp}`);
+      console.log(`📊 Current order: ${allSightings.map(s => `${s._id}:${s.identifiedAt}`).join(', ')}`);
+      
+      // Update the target sighting to have the newest timestamp
+      await ctx.db.patch(sightingId, {
+        identifiedAt: newestTimestamp,
+      });
+      
+      console.log(`✅ Successfully updated sighting ${sightingId} timestamp to ${newestTimestamp}`);
+      
+      // Verify the update worked
+      const updatedSightings = await ctx.db
+        .query("sightings")
+        .withIndex("plantId", (q) => q.eq("plantId", plantId))
+        .order("desc")
+        .collect();
+      
+      console.log(`✅ New order after update: ${updatedSightings.map(s => `${s._id}:${s.identifiedAt}`).join(', ')}`);
+      console.log(`✅ First sighting is now: ${updatedSightings[0]._id} (should be ${sightingId})`);
+      
+      return { success: true };
+    } catch (error) {
+      console.error(`❌ Error setting default photo:`, error);
+      throw error;
     }
-    
-    // Create a timestamp that's newer than all existing ones to make it first
-    const newestTimestamp = Math.max(...allSightings.map(s => s.identifiedAt)) + 1;
-    
-    // Update the target sighting to have the newest timestamp
-    await ctx.db.patch(sightingId, {
-      identifiedAt: newestTimestamp,
-    });
-    
-    console.log(`📸 Set new default photo for plant ${plantId} - sighting ${sightingId} now has timestamp ${newestTimestamp}`);
-    
-    return { success: true };
+  },
+});
+
+// Internal mutation to set database image as default
+export const setDefaultDatabaseImageInternal = internalMutation({
+  args: {
+    plantId: v.id("plants"),
+    imageUrl: v.string(),
+  },
+  
+  handler: async (ctx, { plantId, imageUrl }): Promise<{ success: boolean }> => {
+    try {
+      // Get the plant
+      const plant = await ctx.db.get(plantId);
+      if (!plant) {
+        throw new Error("Plant not found");
+      }
+      
+      console.log(`🖼️ Setting database image as default for plant ${plantId}`);
+      console.log(`📸 Current imageUrl: ${plant.imageUrl}`);
+      console.log(`📸 New default imageUrl: ${imageUrl}`);
+      console.log(`🗂️ Current similar_images: ${plant.similar_images?.slice(0, 3).join(', ')}${(plant.similar_images?.length || 0) > 3 ? '...' : ''}`);
+      
+      // Always reorder similar_images to put the selected one first
+      let reorderedImages = plant.similar_images || [];
+      if (reorderedImages.includes(imageUrl)) {
+        // Move the selected image to the front
+        reorderedImages = [
+          imageUrl,
+          ...reorderedImages.filter(img => img !== imageUrl)
+        ];
+        console.log(`🔄 Reordered similar_images to put default first: ${reorderedImages.slice(0, 3).join(', ')}${reorderedImages.length > 3 ? '...' : ''}`);
+      } else {
+        // If imageUrl is not in similar_images, add it to the front
+        reorderedImages = [imageUrl, ...reorderedImages];
+        console.log(`➕ Added new image to front of similar_images: ${reorderedImages.slice(0, 3).join(', ')}${reorderedImages.length > 3 ? '...' : ''}`);
+      }
+      
+      // Update the plant with the new default image and reordered images
+      await ctx.db.patch(plantId, {
+        imageUrl: imageUrl,
+        similar_images: reorderedImages,
+      });
+      
+      console.log(`✅ Successfully set database image as default for plant ${plantId}`);
+      
+      return { success: true };
+    } catch (error) {
+      console.error(`❌ Failed to set database image as default:`, error);
+      return { success: false };
+    }
   },
 });
 
@@ -2058,6 +2259,7 @@ async function extractAdvancedPlantProfileFields(scientificName: string, descrip
   toxicity?: string;
   otherDetails?: string;
   activeCompounds?: string[];
+  pests?: string[];
 }> {
   console.log('🌱 Extracting advanced fields for:', scientificName);
   console.log('📝 Description provided:', description.substring(0, 100) + '...');
@@ -2081,7 +2283,7 @@ async function extractAdvancedPlantProfileFields(scientificName: string, descrip
         messages: [
           {
             role: 'system',
-            content: `You are a plant expert. Extract detailed information about ${scientificName} focusing on growing conditions, seasonality, and companion planting. Format your response as a JSON object with the following fields:
+            content: `You are a plant expert. Extract detailed information about ${scientificName} focusing on growing conditions, seasonality, companion planting, and common pests. Format your response as a JSON object with the following fields:
 - growingConditions: String describing soil, light, water, temperature requirements
 - seasonInfo: String describing when to plant, grow, and harvest
 - companionPlants: Array of strings with beneficial companion plants
@@ -2090,6 +2292,7 @@ async function extractAdvancedPlantProfileFields(scientificName: string, descrip
 - toxicity: String describing any toxic properties or precautions
 - otherDetails: String with interesting facts, historical significance, cultural uses, ecological importance, and unique characteristics
 - activeCompounds: Array of strings with key active compounds
+- pests: Array of strings with common pests and diseases that affect this plant. Include both insects and diseases. For example: ["Aphids", "Spider mites", "Powdery mildew", "Botrytis"]
 
 For otherDetails, include:
 1. Historical significance and origin
@@ -2123,6 +2326,8 @@ IMPORTANT: All fields must be strings or arrays of strings. Do not use nested ob
 
     try {
       const fields = JSON.parse(content);
+      console.log('🔍 Parsed fields:', fields);
+      console.log('🐛 Pests field:', fields.pests);
       
       // Ensure all fields are in the correct format
       const formattedFields = {
@@ -2133,10 +2338,12 @@ IMPORTANT: All fields must be strings or arrays of strings. Do not use nested ob
         edibilityUses: typeof fields.edibilityUses === 'string' ? fields.edibilityUses : '',
         toxicity: typeof fields.toxicity === 'string' ? fields.toxicity : '',
         otherDetails: typeof fields.otherDetails === 'string' ? fields.otherDetails : '',
-        activeCompounds: Array.isArray(fields.activeCompounds) ? fields.activeCompounds : []
+        activeCompounds: Array.isArray(fields.activeCompounds) ? fields.activeCompounds : [],
+        pests: Array.isArray(fields.pests) ? fields.pests : []
       };
 
       console.log('✅ Successfully parsed and formatted advanced fields:', formattedFields);
+      console.log('🐛 Formatted pests field:', formattedFields.pests);
       return formattedFields;
     } catch (error) {
       console.error('❌ Error parsing OpenAI response:', error);
@@ -2181,6 +2388,7 @@ export const patchPlantFieldsInternal = internalMutation({
       toxicity: v.optional(v.string()),
       otherDetails: v.optional(v.string()),
       activeCompounds: v.optional(v.array(v.string())),
+      pests: v.optional(v.array(v.string())), // <-- add pests
     })
   },
   handler: async (ctx, { plantId, fields }) => {

@@ -1,11 +1,85 @@
 import { Alert } from 'react-native';
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as MediaLibrary from 'expo-media-library';
+
+export interface ImageResult {
+    base64: string;
+    compressedUri: string;
+    location?: {
+        latitude: number;
+        longitude: number;
+        timestamp?: number;
+    };
+}
 
 export const useImageHandler = () => {
+    // Extract GPS coordinates from image EXIF data
+    const extractLocationFromImage = async (uri: string): Promise<{ latitude: number; longitude: number; timestamp?: number } | null> => {
+        try {
+            // Get asset info including EXIF data
+            const asset = await MediaLibrary.getAssetInfoAsync(uri);
+            
+            if (asset.exif) {
+                // Type assertion for EXIF data since the types aren't complete
+                const exifData = asset.exif as any;
+                const { GPS, DateTime } = exifData;
+                
+                if (GPS && GPS.GPSLatitude && GPS.GPSLongitude) {
+                    // Convert GPS coordinates from DMS to decimal degrees
+                    const latitude = convertDMSToDD(
+                        GPS.GPSLatitude,
+                        GPS.GPSLatitudeRef
+                    );
+                    const longitude = convertDMSToDD(
+                        GPS.GPSLongitude,
+                        GPS.GPSLongitudeRef
+                    );
+                    
+                    let timestamp;
+                    if (DateTime) {
+                        timestamp = new Date(DateTime).getTime();
+                    }
+                    
+                    console.log(`📍 Found GPS coordinates in image: ${latitude}, ${longitude}`);
+                    return { latitude, longitude, timestamp };
+                }
+            }
+            
+            return null;
+        } catch (error) {
+            console.log('Could not extract GPS data from image:', error);
+            return null;
+        }
+    };
+
+    // Convert DMS (Degrees Minutes Seconds) to Decimal Degrees
+    const convertDMSToDD = (dms: number[], ref: string): number => {
+        let dd = dms[0] + dms[1] / 60 + dms[2] / 3600;
+        if (ref === 'S' || ref === 'W') {
+            dd = dd * -1;
+        }
+        return dd;
+    };
+
     // Compress image to fit Convex 1MB limit while preserving aspect ratio
-    const compressImage = async (uri: string): Promise<{ base64: string; compressedUri: string }> => {
+    const compressImage = async (uri: string): Promise<ImageResult> => {
         console.log("Compressing image...");
+        
+        // First, try to extract GPS coordinates from the original image
+        let locationData = null;
+        try {
+            locationData = await extractLocationFromImage(uri);
+            if (locationData) {
+                Alert.alert(
+                    "📍 Location Found!",
+                    `GPS coordinates found in photo:\n${locationData.latitude.toFixed(6)}, ${locationData.longitude.toFixed(6)}\n\nThis will be used as the plant location.`,
+                    [{ text: "OK" }]
+                );
+            }
+        } catch (error) {
+            console.log('EXIF extraction failed:', error);
+        }
         
         // Preserve original aspect ratio - no forced cropping
         const resized = await ImageManipulator.manipulateAsync(
@@ -38,15 +112,17 @@ export const useImageHandler = () => {
             if (!furtherCompressed.base64) throw new Error("Failed to compress image further");
             return { 
                 base64: furtherCompressed.base64, 
-                compressedUri: furtherCompressed.uri 
+                compressedUri: furtherCompressed.uri,
+                location: locationData || undefined
             };
         }
         
         return { 
             base64: resized.base64, 
-            compressedUri: resized.uri 
+            compressedUri: resized.uri,
+            location: locationData || undefined
         };
-    };
+    }
 
     const requestPermissions = async () => {
         const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
@@ -74,6 +150,7 @@ export const useImageHandler = () => {
                 quality: 0.8, // Higher quality
                 allowsEditing: true, // Allow user to crop to focus on plant (free aspect)
                 allowsMultipleSelection: false,
+                exif: true, // Include EXIF data
             });
         } catch (error) {
             console.log("Camera not available:", error);
@@ -89,6 +166,7 @@ export const useImageHandler = () => {
                 mediaTypes: ImagePicker.MediaTypeOptions.Images,
                 allowsEditing: true,
                 allowsMultipleSelection: false,
+                exif: true, // Include EXIF data
             });
         } catch (error) {
             console.log("Image library error:", error);
@@ -96,16 +174,14 @@ export const useImageHandler = () => {
         }
     };
 
-    const showImageSourceAlert = (onLibrarySelect: () => void) => {
+    const showImageSourceAlert = (onCameraSelect: () => void, onLibrarySelect: () => void) => {
         Alert.alert(
-            "Choose Photo Source",
-            "Camera not available. Would you like to select a photo from your library?",
+            "Select Image Source",
+            "Choose where to get your plant photo from:",
             [
                 { text: "Cancel", style: "cancel" },
-                { 
-                    text: "Photo Library", 
-                    onPress: onLibrarySelect
-                }
+                { text: "📷 Camera", onPress: onCameraSelect },
+                { text: "📚 Photo Library", onPress: onLibrarySelect },
             ]
         );
     };
@@ -115,6 +191,7 @@ export const useImageHandler = () => {
         requestPermissions,
         launchCamera,
         launchImageLibrary,
-        showImageSourceAlert
+        showImageSourceAlert,
+        extractLocationFromImage
     };
 }; 
