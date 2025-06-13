@@ -1,10 +1,13 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Image, ScrollView, TextInput, Linking, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, Image, ScrollView, TextInput, Linking, Alert, Clipboard } from 'react-native';
 import Markdown from 'react-native-markdown-display';
+import { Id } from "../../convex/_generated/dataModel";
+import LocationMapPreview from './LocationMapPreview';
 
 interface PlantDetailViewProps {
     selectedPlantId: string | null;
     plantDetail: any;
+    plantFeedback?: any[];
     loading: boolean;
     isEditingTraditionalUsage: boolean;
     editedTraditionalUsage: string;
@@ -29,11 +32,16 @@ interface PlantDetailViewProps {
     copyPlantInfo: (plant: any) => void;
     addPhotoToPlant: () => void;
     handleDeleteSighting: (sightingId: any, photoIndex: number) => void;
+    handleSetDefaultPhoto: (sightingId: any) => void;
+    updatePlantFeedback: (args: { feedbackId: Id<"plant_feedback">, feedback: string }) => Promise<any>;
+    addPlantFeedback: (args: { plantId: Id<"plants">, scientificName: string, feedback: string, timestamp: number }) => Promise<any>;
+    refreshPlantData: () => Promise<void>;
 }
 
 export default function PlantDetailView({
     selectedPlantId,
     plantDetail,
+    plantFeedback,
     loading,
     isEditingTraditionalUsage,
     editedTraditionalUsage,
@@ -57,8 +65,21 @@ export default function PlantDetailView({
     insertOrWrapText,
     copyPlantInfo,
     addPhotoToPlant,
-    handleDeleteSighting
+    handleDeleteSighting,
+    handleSetDefaultPhoto,
+    updatePlantFeedback,
+    addPlantFeedback,
+    refreshPlantData
 }: PlantDetailViewProps) {
+    // State for editing feedback
+    const [editingFeedbackId, setEditingFeedbackId] = useState<string | null>(null);
+    const [editingFeedbackText, setEditingFeedbackText] = useState('');
+    const [savingFeedback, setSavingFeedback] = useState(false);
+    // State for adding a new note
+    const [addingNote, setAddingNote] = useState(false);
+    const [newNoteText, setNewNoteText] = useState('');
+    const [savingNewNote, setSavingNewNote] = useState(false);
+
     // Show loading while query is in progress
     if (selectedPlantId && plantDetail === undefined) {
         return (
@@ -125,18 +146,357 @@ export default function PlantDetailView({
             
             {plantDetail && !('error' in plantDetail) && (
                 <View style={{ width: '100%', maxWidth: 400 }}>
-                    {/* Reference Image */}
-                    {plantDetail.imageUrl && (
+                    {/* Reference Image - Show user's photo as the primary reference */}
+                    {plantDetail.userPhotos && plantDetail.userPhotos.length > 0 && (
                         <View style={{ marginBottom: 16 }}>
-                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>📚 Reference Image</Text>
+                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>📸 Your Reference Photo</Text>
                             <TouchableOpacity onPress={() => {
-                                if (plantDetail.imageUrl) setZoomedImage(plantDetail.imageUrl);
+                                if (plantDetail.userPhotos[0]) setZoomedImage(plantDetail.userPhotos[0]);
                             }}>
-                                <Image source={{ uri: plantDetail.imageUrl }} style={{ width: '100%', height: 192, borderRadius: 8 }} />
+                                <View style={{ position: 'relative' }}>
+                                    <Image 
+                                        source={{ uri: plantDetail.userPhotos[0] }} 
+                                        style={{ 
+                                            width: '100%', 
+                                            height: 192, 
+                                            borderRadius: 8,
+                                            backgroundColor: '#f3f4f6'
+                                        }} 
+                                        resizeMode="cover"
+                                    />
+                                    
+                                    {/* Default photo badge */}
+                                    <View style={{
+                                        position: 'absolute',
+                                        top: 8,
+                                        right: 8,
+                                        backgroundColor: 'rgba(16, 185, 129, 0.95)',
+                                        paddingHorizontal: 8,
+                                        paddingVertical: 4,
+                                        borderRadius: 6,
+                                        shadowColor: '#000',
+                                        shadowOffset: { width: 0, height: 1 },
+                                        shadowOpacity: 0.2,
+                                        shadowRadius: 2,
+                                        elevation: 2,
+                                    }}>
+                                        <Text style={{ color: 'white', fontSize: 11, fontWeight: '700' }}>
+                                            ⭐ Default
+                                        </Text>
+                                    </View>
+                                </View>
                             </TouchableOpacity>
+                            <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                                The main reference photo for this plant species
+                            </Text>
+                        </View>
+                    )}
+
+                    {/* Comprehensive Photo Gallery - All images in one place */}
+                    {((plantDetail.userPhotos && plantDetail.userPhotos.length > 1) || (plantDetail.similar_images && plantDetail.similar_images.length > 0) || true) && (
+                        <View style={{ marginBottom: 16 }}>
+                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>
+                                🖼️ Photo Gallery
+                            </Text>
+                            <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+                                {(() => {
+                                    const userPhotoCount = plantDetail.userPhotos ? plantDetail.userPhotos.length - 1 : 0; // Subtract 1 for reference photo
+                                    const databasePhotoCount = plantDetail.similar_images ? plantDetail.similar_images.length : 0;
+                                    const totalCount = userPhotoCount + databasePhotoCount;
+                                    
+                                    if (userPhotoCount > 0 && databasePhotoCount > 0) {
+                                        return `${userPhotoCount} your photos • ${databasePhotoCount} database images • ${totalCount} total`;
+                                    } else if (userPhotoCount > 0) {
+                                        return `${userPhotoCount} additional photos of your plant`;
+                                    } else if (databasePhotoCount > 0) {
+                                        return `${databasePhotoCount} reference images from community database`;
+                                    }
+                                    return 'Add photos to build a comprehensive gallery';
+                                })()}
+                            </Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                                <View style={{ flexDirection: 'row', gap: 8 }}>
+                                    {/* Add Photo Button - First item in gallery */}
+                                    <TouchableOpacity 
+                                        style={{
+                                            width: 120,
+                                            height: 120,
+                                            borderRadius: 8,
+                                            backgroundColor: '#f0fdf4',
+                                            borderWidth: 2,
+                                            borderColor: '#bbf7d0',
+                                            borderStyle: 'dashed',
+                                            justifyContent: 'center',
+                                            alignItems: 'center',
+                                            position: 'relative'
+                                        }}
+                                        onPress={addPhotoToPlant}
+                                        disabled={loading}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Text style={{ fontSize: 24, marginBottom: 4 }}>📸</Text>
+                                        <Text style={{ 
+                                            fontSize: 11, 
+                                            fontWeight: '600', 
+                                            color: loading ? '#9ca3af' : '#059669',
+                                            textAlign: 'center',
+                                            paddingHorizontal: 8
+                                        }}>
+                                            {loading ? 'Adding...' : 'Add Photo'}
+                                        </Text>
+                                        
+                                        {/* Pulse animation hint */}
+                                        {!loading && (
+                                            <View style={{
+                                                position: 'absolute',
+                                                top: 8,
+                                                right: 8,
+                                                width: 8,
+                                                height: 8,
+                                                borderRadius: 4,
+                                                backgroundColor: '#10b981'
+                                            }} />
+                                        )}
+                                    </TouchableOpacity>
+
+                                    {/* User's additional photos (excluding the reference photo) */}
+                                    {plantDetail.userPhotos && plantDetail.userPhotos.length > 1 && 
+                                        plantDetail.userPhotos.slice(1).map((photo: string, index: number) => {
+                                            const actualIndex = index + 1; // Adjust for deletion since we skip first photo
+                                            
+                                            return (
+                                                <View 
+                                                    key={`user-${actualIndex}`} 
+                                                    style={{ position: 'relative' }}
+                                                >
+                                                    <TouchableOpacity 
+                                                        onPress={() => setZoomedImage(photo)}
+                                                        onLongPress={() => {
+                                                            Alert.alert(
+                                                                "Photo Options",
+                                                                "Choose an action for this photo:",
+                                                                [
+                                                                    { text: "Cancel", style: "cancel" },
+                                                                    {
+                                                                        text: "🖼️ Set as Default",
+                                                                        onPress: () => {
+                                                                            Alert.alert(
+                                                                                "Set Default Photo",
+                                                                                "Make this the main reference photo for this plant?",
+                                                                                [
+                                                                                    { text: "Cancel", style: "cancel" },
+                                                                                    {
+                                                                                        text: "Set Default",
+                                                                                        onPress: () => {
+                                                                                            const sighting = plantDetail.allSightings?.[actualIndex];
+                                                                                            if (sighting) {
+                                                                                                handleSetDefaultPhoto(sighting._id);
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                ]
+                                                                            );
+                                                                        }
+                                                                    },
+                                                                    {
+                                                                        text: "🗑️ Delete Photo",
+                                                                        style: "destructive",
+                                                                        onPress: () => {
+                                                                            Alert.alert(
+                                                                                "Delete Photo",
+                                                                                "Are you sure you want to delete this photo? This cannot be undone.",
+                                                                                [
+                                                                                    { text: "Cancel", style: "cancel" },
+                                                                                    {
+                                                                                        text: "Delete",
+                                                                                        style: "destructive",
+                                                                                        onPress: () => {
+                                                                                            const sighting = plantDetail.allSightings?.[actualIndex];
+                                                                                            if (sighting) {
+                                                                                                handleDeleteSighting(sighting._id, actualIndex);
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                ]
+                                                                            );
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            );
+                                                        }}
+                                                        style={{
+                                                            borderRadius: 8,
+                                                            overflow: 'hidden'
+                                                        }}
+                                                        activeOpacity={0.8}
+                                                    >
+                                                        <Image 
+                                                            source={{ uri: photo }} 
+                                                            style={{ 
+                                                                width: 120, 
+                                                                height: 120, 
+                                                                backgroundColor: '#f3f4f6'
+                                                            }} 
+                                                            resizeMode="cover"
+                                                        />
+                                                        
+                                                        {/* Photo source indicator */}
+                                                        <View style={{
+                                                            position: 'absolute',
+                                                            bottom: 4,
+                                                            left: 4,
+                                                            backgroundColor: 'rgba(5, 150, 105, 0.9)',
+                                                            paddingHorizontal: 4,
+                                                            paddingVertical: 2,
+                                                            borderRadius: 4
+                                                        }}>
+                                                            <Text style={{ color: 'white', fontSize: 8, fontWeight: '600' }}>
+                                                                📸 Your Photo
+                                                            </Text>
+                                                        </View>
+
+                                                        {/* Set as default hint */}
+                                                        <View style={{
+                                                            position: 'absolute',
+                                                            top: 4,
+                                                            left: 4,
+                                                            backgroundColor: 'rgba(59, 130, 246, 0.9)',
+                                                            paddingHorizontal: 4,
+                                                            paddingVertical: 2,
+                                                            borderRadius: 4
+                                                        }}>
+                                                            <Text style={{ color: 'white', fontSize: 8, fontWeight: '600' }}>
+                                                                Hold
+                                                            </Text>
+                                                        </View>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            );
+                                        })
+                                    }
+                                    
+                                    {/* Database images */}
+                                    {plantDetail.similar_images && plantDetail.similar_images.map((imageUrl: string, index: number) => (
+                                        <TouchableOpacity 
+                                            key={`database-${index}`} 
+                                            onPress={() => setZoomedImage(imageUrl)}
+                                            onLongPress={() => {
+                                                Alert.alert(
+                                                    "Database Image Options",
+                                                    "Choose an action for this reference image:",
+                                                    [
+                                                        { text: "Cancel", style: "cancel" },
+                                                        {
+                                                            text: "🔍 View Larger",
+                                                            onPress: () => setZoomedImage(imageUrl)
+                                                        },
+                                                        {
+                                                            text: "📋 Copy Image URL",
+                                                            onPress: async () => {
+                                                                try {
+                                                                    await Clipboard.setString(imageUrl);
+                                                                    Alert.alert("✅ Copied", "Image URL copied to clipboard!");
+                                                                } catch (error) {
+                                                                    Alert.alert("❌ Error", "Failed to copy URL");
+                                                                }
+                                                            }
+                                                        },
+                                                        {
+                                                            text: "🗑️ Remove from Collection",
+                                                            style: "destructive",
+                                                            onPress: () => {
+                                                                Alert.alert(
+                                                                    "Remove Reference Image",
+                                                                    "Remove this image from your plant's reference collection?",
+                                                                    [
+                                                                        { text: "Cancel", style: "cancel" },
+                                                                        {
+                                                                            text: "Remove",
+                                                                            style: "destructive",
+                                                                            onPress: () => {
+                                                                                // TODO: Implement remove database image functionality
+                                                                                Alert.alert(
+                                                                                    "Feature Coming Soon",
+                                                                                    "The ability to manage reference images will be available in the next update!"
+                                                                                );
+                                                                            }
+                                                                        }
+                                                                    ]
+                                                                );
+                                                            }
+                                                        }
+                                                    ]
+                                                );
+                                            }}
+                                            style={{
+                                                position: 'relative',
+                                                borderRadius: 8,
+                                                overflow: 'hidden'
+                                            }}
+                                            activeOpacity={0.8}
+                                        >
+                                            <Image 
+                                                source={{ uri: imageUrl }} 
+                                                style={{ 
+                                                    width: 120, 
+                                                    height: 120, 
+                                                    backgroundColor: '#f3f4f6'
+                                                }} 
+                                                resizeMode="cover"
+                                                onError={() => {
+                                                    console.log(`Failed to load database image: ${imageUrl}`);
+                                                }}
+                                            />
+                                            
+                                            {/* Photo source indicator */}
+                                            <View style={{
+                                                position: 'absolute',
+                                                bottom: 4,
+                                                left: 4,
+                                                backgroundColor: 'rgba(107, 114, 128, 0.9)',
+                                                paddingHorizontal: 4,
+                                                paddingVertical: 2,
+                                                borderRadius: 4
+                                            }}>
+                                                <Text style={{ color: 'white', fontSize: 8, fontWeight: '600' }}>
+                                                    🗂️ Database
+                                                </Text>
+                                            </View>
+
+                                            {/* Hold hint for database images */}
+                                            <View style={{
+                                                position: 'absolute',
+                                                top: 4,
+                                                left: 4,
+                                                backgroundColor: 'rgba(107, 114, 128, 0.9)',
+                                                paddingHorizontal: 4,
+                                                paddingVertical: 2,
+                                                borderRadius: 4
+                                            }}>
+                                                <Text style={{ color: 'white', fontSize: 8, fontWeight: '600' }}>
+                                                    Hold
+                                                </Text>
+                                            </View>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            </ScrollView>
+                            
+                            <Text style={{ fontSize: 11, color: '#6b7280', textAlign: 'center', marginTop: 4 }}>
+                                💡 Tap to zoom • Long press your photos for options • Hold database images for actions • Hold to set default or delete
+                            </Text>
                         </View>
                     )}
                     
+                    {/* Location Information */}
+                    {plantDetail.location && (
+                        <LocationMapPreview
+                            location={plantDetail.location}
+                            plantName={plantDetail.commonNames?.[0] || plantDetail.scientificName}
+                            style={{ marginBottom: 16 }}
+                        />
+                    )}
+
                     {/* Plant Info */}
                     <View style={{ marginBottom: 16, padding: 16, backgroundColor: 'white', borderRadius: 12 }}>
                         <Text selectable style={{ fontSize: 18, fontWeight: 'bold', color: '#15803d', marginBottom: 4 }}>
@@ -506,43 +866,164 @@ export default function PlantDetailView({
                             </View>
                         </View>
 
-                        {/* Safety Information */}
-                        <View style={{ marginBottom: 8 }}>
-                            <TouchableOpacity 
-                                style={{ 
-                                    flexDirection: 'row', 
-                                    justifyContent: 'space-between', 
-                                    alignItems: 'center',
-                                    backgroundColor: '#fef2f2',
-                                    padding: 12,
-                                    borderRadius: 6,
-                                    borderWidth: 1,
-                                    borderColor: '#fecaca'
-                                }}
-                                onPress={() => setShowSafetyInfo(!showSafetyInfo)}
-                            >
-                                <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534' }}>⚠️ Safety & Precautions</Text>
-                                <Text style={{ fontSize: 16, color: '#991b1b' }}>
-                                    {showSafetyInfo ? '▼' : '▶'}
-                                </Text>
-                            </TouchableOpacity>
-                            
-                            {showSafetyInfo && (
-                                <View style={{ 
-                                    backgroundColor: '#fef2f2', 
-                                    padding: 12, 
-                                    borderRadius: 6,
-                                    borderWidth: 1,
-                                    borderColor: '#fecaca',
-                                    marginTop: 4
-                                }}>
-                                    <Text style={{ fontSize: 12, color: '#991b1b', lineHeight: 16 }}>
-                                        <Text style={{ fontWeight: 'bold' }}>⚠️ Important:</Text> Always consult with a qualified healthcare professional before using any plant for medicinal purposes. Plant identification through photos may not be 100% accurate. Never consume unknown plants.
-                                    </Text>
-                                    <Text style={{ fontSize: 10, color: '#7f1d1d', marginTop: 4, fontStyle: 'italic' }}>
-                                        This information is for educational purposes only and is not medical advice.
-                                    </Text>
+                        {/* User Notes & Feedback Section */}
+                        <View style={{ marginBottom: 16, padding: 16, backgroundColor: '#f0fdf4', borderRadius: 12, borderWidth: 1, borderColor: '#bbf7d0' }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, justifyContent: 'space-between' }}>
+                                <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534' }}>📝 User Notes & Corrections</Text>
+                                {!addingNote && (
+                                    <TouchableOpacity
+                                        style={{ marginLeft: 8, backgroundColor: '#d1fae5', borderRadius: 20, padding: 6, borderWidth: 1, borderColor: '#6ee7b7' }}
+                                        onPress={() => {
+                                            setAddingNote(true);
+                                            setEditingFeedbackId(null);
+                                        }}
+                                        disabled={addingNote || editingFeedbackId !== null}
+                                    >
+                                        <Text style={{ color: '#047857', fontSize: 18 }}>➕</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                            {/* Add Note Button or Form */}
+                            {addingNote && (
+                                <View style={{ marginBottom: 16 }}>
+                                    <TextInput
+                                        style={{
+                                            borderWidth: 1,
+                                            borderColor: '#d1d5db',
+                                            borderRadius: 6,
+                                            padding: 8,
+                                            minHeight: 40,
+                                            fontSize: 13,
+                                            marginBottom: 6
+                                        }}
+                                        value={newNoteText}
+                                        onChangeText={setNewNoteText}
+                                        multiline
+                                        editable={!savingNewNote}
+                                        placeholder="Add a note or correction about this plant..."
+                                    />
+                                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                                        <TouchableOpacity
+                                            style={{ backgroundColor: '#059669', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6, opacity: savingNewNote ? 0.6 : 1 }}
+                                            onPress={async () => {
+                                                if (!plantDetail || !plantDetail._id || !plantDetail.scientificName) return;
+                                                setSavingNewNote(true);
+                                                try {
+                                                    await addPlantFeedback({
+                                                        plantId: plantDetail._id,
+                                                        scientificName: plantDetail.scientificName,
+                                                        feedback: newNoteText,
+                                                        timestamp: Date.now(),
+                                                    });
+                                                    setAddingNote(false);
+                                                    setNewNoteText('');
+                                                } catch (err) {
+                                                    Alert.alert('Error', 'Failed to add note');
+                                                } finally {
+                                                    setSavingNewNote(false);
+                                                }
+                                            }}
+                                            disabled={savingNewNote || newNoteText.trim() === ''}
+                                        >
+                                            <Text style={{ color: 'white', fontWeight: '600' }}>Save</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={{ backgroundColor: '#e5e7eb', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 }}
+                                            onPress={() => {
+                                                setAddingNote(false);
+                                                setNewNoteText('');
+                                            }}
+                                            disabled={savingNewNote}
+                                        >
+                                            <Text style={{ color: '#374151' }}>Cancel</Text>
+                                        </TouchableOpacity>
+                                    </View>
                                 </View>
+                            )}
+                            {plantFeedback && plantFeedback.length > 0 ? (
+                                <ScrollView style={{ maxHeight: 160 }}>
+                                    {plantFeedback.map((fb, idx) => (
+                                        <View key={fb._id || idx} style={{ marginBottom: 12, paddingBottom: 8, borderBottomWidth: idx < plantFeedback.length - 1 ? 1 : 0, borderColor: '#d1fae5', backgroundColor: 'white', borderRadius: 8, padding: 10, minHeight: 48 }}>
+                                            <View style={{ flex: 1 }}>
+                                                {editingFeedbackId === fb._id ? (
+                                                    <>
+                                                        <TextInput
+                                                            style={{
+                                                                borderWidth: 1,
+                                                                borderColor: '#d1d5db',
+                                                                borderRadius: 6,
+                                                                padding: 8,
+                                                                minHeight: 40,
+                                                                fontSize: 13,
+                                                                marginBottom: 6
+                                                            }}
+                                                            value={editingFeedbackText}
+                                                            onChangeText={setEditingFeedbackText}
+                                                            multiline
+                                                            editable={!savingFeedback}
+                                                        />
+                                                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                                                            <TouchableOpacity
+                                                                style={{ backgroundColor: '#059669', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6, opacity: savingFeedback ? 0.6 : 1 }}
+                                                                onPress={async () => {
+                                                                    setSavingFeedback(true);
+                                                                    try {
+                                                                        await updatePlantFeedback({ feedbackId: fb._id, feedback: editingFeedbackText });
+                                                                        setEditingFeedbackId(null);
+                                                                        setEditingFeedbackText('');
+                                                                    } catch (err) {
+                                                                        Alert.alert('Error', 'Failed to update note');
+                                                                    } finally {
+                                                                        setSavingFeedback(false);
+                                                                    }
+                                                                }}
+                                                                disabled={savingFeedback || editingFeedbackText.trim() === ''}
+                                                            >
+                                                                <Text style={{ color: 'white', fontWeight: '600' }}>Save</Text>
+                                                            </TouchableOpacity>
+                                                            <TouchableOpacity
+                                                                style={{ backgroundColor: '#e5e7eb', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 }}
+                                                                onPress={() => {
+                                                                    setEditingFeedbackId(null);
+                                                                    setEditingFeedbackText('');
+                                                                }}
+                                                                disabled={savingFeedback}
+                                                            >
+                                                                <Text style={{ color: '#374151' }}>Cancel</Text>
+                                                            </TouchableOpacity>
+                                                        </View>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Text style={{ fontSize: 13, color: '#374151', marginBottom: 4 }}>
+                                                            {fb.feedback}
+                                                        </Text>
+                                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                                                            <Text style={{ fontSize: 11, color: '#6b7280', fontStyle: 'italic' }}>
+                                                                {new Date(fb.timestamp).toLocaleString()}
+                                                            </Text>
+                                                            {editingFeedbackId !== fb._id && (
+                                                                <TouchableOpacity
+                                                                    style={{ marginLeft: 8, padding: 2 }}
+                                                                    onPress={() => {
+                                                                        setEditingFeedbackId(fb._id);
+                                                                        setEditingFeedbackText(fb.feedback);
+                                                                    }}
+                                                                >
+                                                                    <Text style={{ fontSize: 14, color: '#b45309' }}>✏️</Text>
+                                                                </TouchableOpacity>
+                                                            )}
+                                                        </View>
+                                                    </>
+                                                )}
+                                            </View>
+                                        </View>
+                                    ))}
+                                </ScrollView>
+                            ) : (
+                                <Text style={{ fontSize: 13, color: '#6b7280', fontStyle: 'italic' }}>
+                                    No notes or corrections have been added for this plant yet.
+                                </Text>
                             )}
                         </View>
                         
@@ -573,100 +1054,101 @@ export default function PlantDetailView({
                                 📋 Copy All Plant Info
                             </Text>
                         </TouchableOpacity>
-                        
-                        {/* Add Photo Button */}
-                        <TouchableOpacity 
-                            style={{ 
-                                marginTop: 8, 
-                                padding: 10, 
-                                backgroundColor: '#0284c7', 
-                                borderRadius: 6, 
-                                alignItems: 'center' 
-                            }}
-                            onPress={addPhotoToPlant}
-                            disabled={loading}
-                        >
-                            <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>
-                                {loading ? '📸 Adding Photo...' : '📸 Add Another Photo'}
-                            </Text>
-                        </TouchableOpacity>
                     </View>
 
-                    {/* User Photos Gallery */}
-                    {plantDetail.userPhotos.length > 0 && (
-                        <View style={{ marginBottom: 16 }}>
-                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>
-                                📸 Your Photos ({plantDetail.userPhotos.length})
-                            </Text>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
-                                {plantDetail.userPhotos.map((photo: string, index: number) => (
-                                    <View 
-                                        key={index} 
-                                        style={{ position: 'relative', marginRight: 8 }}
-                                    >
-                                        <TouchableOpacity onPress={() => setZoomedImage(photo)}>
-                                            <Image 
-                                                source={{ uri: photo }} 
-                                                style={{ 
-                                                    width: 120, 
-                                                    height: 120, 
-                                                    borderRadius: 8, 
-                                                    backgroundColor: '#f3f4f6'
-                                                }} 
-                                            />
-                                        </TouchableOpacity>
-                                        
-                                        {/* Delete button - visible in admin mode */}
-                                        {adminMode && plantDetail.allSightings?.[index] && (
-                                            <TouchableOpacity
-                                                style={{
-                                                    position: 'absolute',
-                                                    top: 4,
-                                                    right: 4,
-                                                    backgroundColor: 'rgba(220, 38, 38, 0.9)',
-                                                    borderRadius: 12,
-                                                    width: 24,
-                                                    height: 24,
-                                                    justifyContent: 'center',
-                                                    alignItems: 'center',
-                                                    shadowColor: '#000',
-                                                    shadowOffset: { width: 0, height: 2 },
-                                                    shadowOpacity: 0.25,
-                                                    shadowRadius: 3.84,
-                                                    elevation: 5,
-                                                }}
-                                                onPress={(e) => {
-                                                    e.stopPropagation();
-                                                    const sighting = plantDetail.allSightings[index];
-                                                    if (sighting) {
-                                                        handleDeleteSighting(sighting._id, index);
-                                                    }
-                                                }}
-                                            >
-                                                <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>×</Text>
-                                            </TouchableOpacity>
-                                        )}
-                                    </View>
-                                ))}
-                            </ScrollView>
-                            <Text style={{ fontSize: 12, color: '#6b7280' }}>
-                                💡 Each photo helps build a better reference for this species!
-                                {adminMode && " • Tap × to delete individual photos"}
-                            </Text>
+                    {/* Growing Conditions, Season Info, Companion Plants, More Details */}
+                    <View style={{ marginBottom: 16, padding: 14, backgroundColor: '#f0fdf4', borderRadius: 10, borderWidth: 1, borderColor: '#bbf7d0' }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534' }}>🌱 Growing Conditions</Text>
+                            <TouchableOpacity
+                                onPress={refreshPlantData}
+                                style={{ padding: 4 }}
+                                disabled={loading}
+                            >
+                                {loading ? (
+                                    <ActivityIndicator size="small" color="#059669" />
+                                ) : (
+                                    <Text style={{ color: '#059669', fontSize: 12 }}>🔄 Refresh</Text>
+                                )}
+                            </TouchableOpacity>
                         </View>
-                    )}
-
-                    {/* Coming Soon Notice for Additional Features */}
-                    <View style={{ marginBottom: 16, padding: 12, backgroundColor: '#ecfdf5', borderRadius: 8, borderWidth: 1, borderColor: '#059669' }}>
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#059669', marginBottom: 4 }}>
-                            ✨ Enhanced Plant Profiles Available!
+                        <Text style={{ fontSize: 13, color: '#374151', marginBottom: 10 }}>
+                            {plantDetail.growingConditions || 'No growing conditions data available yet.'}
                         </Text>
-                        <Text style={{ fontSize: 11, color: '#047857', marginBottom: 6 }}>
-                            Your plant profiles now include classification, observation statistics, and safety information.
+                        <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>🗓️ Season Info</Text>
+                        <Text style={{ fontSize: 13, color: '#374151', marginBottom: 10 }}>
+                            {plantDetail.seasonInfo || 'No seasonality information available yet.'}
                         </Text>
-                        <Text style={{ fontSize: 10, color: '#065f46', fontStyle: 'italic' }}>
-                            🔮 Coming soon: Growing conditions, seasonal info, companion plants, and more detailed botanical characteristics!
-                        </Text>
+                        <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>🌼 Companion Plants</Text>
+                        {plantDetail.companionPlants && plantDetail.companionPlants.length > 0 ? (
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 10 }}>
+                                {plantDetail.companionPlants.map((plant: string, index: number) => (
+                                    <TouchableOpacity 
+                                        key={index}
+                                        onPress={async () => {
+                                            try {
+                                                // Format the plant name for Wikipedia URL
+                                                const wikiUrl = `https://en.wikipedia.org/wiki/${plant.replace(/\s+/g, '_')}`;
+                                                const supported = await Linking.canOpenURL(wikiUrl);
+                                                if (supported) {
+                                                    await Linking.openURL(wikiUrl);
+                                                } else {
+                                                    Alert.alert("Error", "Cannot open Wikipedia link");
+                                                }
+                                            } catch (error) {
+                                                Alert.alert("Error", "Failed to open Wikipedia link");
+                                            }
+                                        }}
+                                        style={{ 
+                                            backgroundColor: '#fef3c7', 
+                                            paddingHorizontal: 8, 
+                                            paddingVertical: 4, 
+                                            borderRadius: 12, 
+                                            marginRight: 6, 
+                                            marginBottom: 4,
+                                            borderWidth: 1,
+                                            borderColor: '#f59e0b',
+                                            flexDirection: 'row',
+                                            alignItems: 'center'
+                                        }}
+                                    >
+                                        <Text selectable style={{ fontSize: 12, color: '#92400e', fontWeight: '500' }}>
+                                            {plant}
+                                        </Text>
+                                        <Text style={{ fontSize: 10, color: '#92400e', marginLeft: 4 }}>🔗</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        ) : (
+                            <Text style={{ fontSize: 13, color: '#374151', marginBottom: 10 }}>
+                                No companion plant data available yet.
+                            </Text>
+                        )}
+                        <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>🔎 More Details</Text>
+                        {plantDetail.moreDetails ? (
+                            <View style={{ 
+                                backgroundColor: '#f0fdf4', 
+                                padding: 12, 
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: '#bbf7d0'
+                            }}>
+                                <Markdown style={{
+                                    body: { fontSize: 13, color: '#374151', lineHeight: 18 },
+                                    heading1: { fontSize: 14, fontWeight: 'bold', color: '#166534', marginBottom: 4 },
+                                    heading2: { fontSize: 13, fontWeight: 'bold', color: '#166534', marginBottom: 3 },
+                                    strong: { fontWeight: 'bold', color: '#166534' },
+                                    list_item: { fontSize: 13, color: '#374151', marginBottom: 2 },
+                                    paragraph: { fontSize: 13, color: '#374151', marginBottom: 4 }
+                                }}>
+                                    {plantDetail.moreDetails}
+                                </Markdown>
+                            </View>
+                        ) : (
+                            <Text style={{ fontSize: 13, color: '#374151' }}>
+                                No additional details available yet.
+                            </Text>
+                        )}
                     </View>
 
                     {/* Wikipedia Link */}
@@ -696,6 +1178,46 @@ export default function PlantDetailView({
                             <Text style={{ color: 'white', fontWeight: '600' }}>📖 Learn More on Wikipedia</Text>
                         </TouchableOpacity>
                     )}
+
+                    {/* Safety Information - moved to bottom and with clearer color */}
+                    <View style={{ marginTop: 20, marginBottom: 8 }}>
+                        <TouchableOpacity 
+                            style={{ 
+                                flexDirection: 'row', 
+                                justifyContent: 'space-between', 
+                                alignItems: 'center',
+                                backgroundColor: '#fef08a', // bright yellow
+                                padding: 14,
+                                borderRadius: 8,
+                                borderWidth: 2,
+                                borderColor: '#facc15', // strong yellow border
+                                marginBottom: 0
+                            }}
+                            onPress={() => setShowSafetyInfo(!showSafetyInfo)}
+                        >
+                            <Text style={{ fontSize: 16, fontWeight: '700', color: '#b91c1c' }}>⚠️ Safety & Precautions</Text>
+                            <Text style={{ fontSize: 18, color: '#b91c1c' }}>
+                                {showSafetyInfo ? '▼' : '▶'}
+                            </Text>
+                        </TouchableOpacity>
+                        {showSafetyInfo && (
+                            <View style={{ 
+                                backgroundColor: '#fef2f2', 
+                                padding: 14, 
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: '#fecaca',
+                                marginTop: 4
+                            }}>
+                                <Text style={{ fontSize: 13, color: '#991b1b', lineHeight: 18 }}>
+                                    <Text style={{ fontWeight: 'bold' }}>⚠️ Important:</Text> Always consult with a qualified healthcare professional before using any plant for medicinal purposes. Plant identification through photos may not be 100% accurate. Never consume unknown plants.
+                                </Text>
+                                <Text style={{ fontSize: 11, color: '#7f1d1d', marginTop: 6, fontStyle: 'italic' }}>
+                                    This information is for educational purposes only and is not medical advice.
+                                </Text>
+                            </View>
+                        )}
+                    </View>
                 </View>
             )}
         </>

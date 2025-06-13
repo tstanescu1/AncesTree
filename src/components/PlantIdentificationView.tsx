@@ -28,7 +28,7 @@ export default function PlantIdentificationView({
     plant,
     multiPhotoMode,
     capturedPhotos,
-    showRecentPlants,
+    showRecentPlants = true,
     recentPlants,
     plants,
     setMultiPhotoMode,
@@ -484,7 +484,7 @@ export default function PlantIdentificationView({
                     )}
                     
                     <Text style={{ fontWeight: '600', color: '#166534' }}>Medicinal Properties:</Text>
-                    {plant.tags.length > 0 ? (
+                    {plant.tags && plant.tags.length > 0 ? (
                         <View style={{ marginTop: 4, marginBottom: 8 }}>
                             <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                                 {plant.tags.map((tag: string, index: number) => (
@@ -511,11 +511,7 @@ export default function PlantIdentificationView({
                                 ✨ Powered by AI analysis
                             </Text>
                         </View>
-                    ) : (
-                        <Text selectable style={{ fontSize: 14, color: '#6b7280', marginBottom: 8 }}>
-                            No medicinal properties found in available data
-                        </Text>
-                    )}
+                    ) : null}
 
                     {/* Traditional Usage Information */}
                     <View style={{ marginBottom: 16 }}>
@@ -662,27 +658,26 @@ export default function PlantIdentificationView({
                                         <Text style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
                                             {recentPlant.scientificName}
                                         </Text>
-                                        {recentPlant.medicinalTags.length > 0 && (
-                                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 2 }}>
+                                        {/* Medicinal tags */}
+                                        {recentPlant.medicinalTags && recentPlant.medicinalTags.length > 0 && (
+                                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 8, gap: 4 }}>
                                                 {recentPlant.medicinalTags.slice(0, 2).map((tag: string, tagIndex: number) => (
-                                                    <Text 
+                                                    <View
                                                         key={tagIndex}
-                                                        style={{ 
-                                                            fontSize: 9, 
-                                                            color: '#059669',
-                                                            backgroundColor: '#dcfce7',
-                                                            paddingHorizontal: 4,
-                                                            paddingVertical: 1,
-                                                            borderRadius: 4,
-                                                            marginRight: 4,
-                                                            marginTop: 2
+                                                        style={{
+                                                            backgroundColor: '#f0fdf4',
+                                                            paddingHorizontal: 6,
+                                                            paddingVertical: 2,
+                                                            borderRadius: 8,
+                                                            borderWidth: 1,
+                                                            borderColor: '#bbf7d0',
                                                         }}
                                                     >
-                                                        {tag}
-                                                    </Text>
+                                                        <Text style={{ fontSize: 9, color: '#15803d', fontWeight: '500' }}>{tag}</Text>
+                                                    </View>
                                                 ))}
-                                                {recentPlant.medicinalTags.length > 2 && (
-                                                    <Text style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
+                                                {recentPlant.medicinalTags && recentPlant.medicinalTags.length > 2 && (
+                                                    <Text style={{ fontSize: 9, color: '#6b7280', alignSelf: 'center' }}>
                                                         +{recentPlant.medicinalTags.length - 2}
                                                     </Text>
                                                 )}

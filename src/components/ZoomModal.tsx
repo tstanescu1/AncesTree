@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, Image, ScrollView, Modal, Dimensions } from 'react-native';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -11,6 +11,13 @@ interface ZoomModalProps {
 
 export default function ZoomModal({ visible, imageUri, onClose }: ZoomModalProps) {
     const [zoomScale, setZoomScale] = useState(1);
+
+    // Reset zoom when modal opens or image changes
+    useEffect(() => {
+        if (visible) {
+            setZoomScale(1);
+        }
+    }, [visible, imageUri]);
 
     const handleClose = () => {
         setZoomScale(1);
@@ -56,6 +63,7 @@ export default function ZoomModal({ visible, imageUri, onClose }: ZoomModalProps
                 {/* Zoomable ScrollView */}
                 {imageUri && (
                     <ScrollView
+                        key={imageUri}
                         style={{ flex: 1 }}
                         contentContainerStyle={{ 
                             flexGrow: 1, 

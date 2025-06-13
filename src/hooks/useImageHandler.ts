@@ -3,11 +3,11 @@ import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from 'expo-image-manipulator';
 
 export const useImageHandler = () => {
-    // Compress image to fit Convex 1MB limit while respecting crop
+    // Compress image to fit Convex 1MB limit while preserving aspect ratio
     const compressImage = async (uri: string): Promise<{ base64: string; compressedUri: string }> => {
-        console.log("Compressing cropped image...");
+        console.log("Compressing image...");
         
-        // Preserve aspect ratio while compressing (user already cropped to square in picker)
+        // Preserve original aspect ratio - no forced cropping
         const resized = await ImageManipulator.manipulateAsync(
             uri,
             [{ resize: { width: 800 } }], // Let height scale naturally to preserve aspect ratio
@@ -71,9 +71,8 @@ export const useImageHandler = () => {
         try {
             return await ImagePicker.launchCameraAsync({ 
                 base64: false,
-                quality: 0.7,
-                allowsEditing: true,
-                aspect: [1, 1], // Square crop for consistent plant focus
+                quality: 0.8, // Higher quality
+                allowsEditing: true, // Allow user to crop to focus on plant (free aspect)
                 allowsMultipleSelection: false,
             });
         } catch (error) {
@@ -86,10 +85,9 @@ export const useImageHandler = () => {
         try {
             return await ImagePicker.launchImageLibraryAsync({ 
                 base64: false,
-                quality: 0.7,
+                quality: 0.8,
                 mediaTypes: ImagePicker.MediaTypeOptions.Images,
                 allowsEditing: true,
-                aspect: [1, 1],
                 allowsMultipleSelection: false,
             });
         } catch (error) {
