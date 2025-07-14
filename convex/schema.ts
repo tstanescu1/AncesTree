@@ -31,6 +31,13 @@ export default defineSchema({
     address: v.optional(v.string()),
     accuracy: v.optional(v.number()),
     locationTimestamp: v.optional(v.number()),
+    // Medicinal details per sighting
+    medicinalUses: v.optional(v.array(v.string())),
+    preparationMethods: v.optional(v.array(v.string())),
+    partsUsed: v.optional(v.array(v.string())),
+    dosageNotes: v.optional(v.string()),
+    sourceAttribution: v.optional(v.string()),
+    userExperience: v.optional(v.string()),
   }).index("plantId", ["plantId"]),
 
   plant_feedback: defineTable({
@@ -48,5 +55,20 @@ export default defineSchema({
       probability: v.number(),
     })),
     timestamp: v.number()
-  }).index("rejectedPlantName", ["rejectedPlantName"])
+  }).index("rejectedPlantName", ["rejectedPlantName"]),
+
+  chat_messages: defineTable({
+    messageId: v.string(),
+    plantId: v.id("plants"),
+    sightingId: v.optional(v.id("sightings")),
+    role: v.string(), // "user" or "assistant"
+    content: v.string(),
+    timestamp: v.number(),
+    parentMessageId: v.optional(v.string()),
+    editedAt: v.optional(v.number()), // Temporary field for old data
+    isEdited: v.optional(v.boolean()), // Temporary field for old data
+  })
+  .index("plantId", ["plantId"])
+  .index("messageId", ["messageId"])
+  .index("sightingId", ["sightingId"])
 });

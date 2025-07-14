@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
     View, 
     Text, 
@@ -33,9 +33,11 @@ export default function LocationPickerModal({
         loadingLocation,
         formatCoordinates,
         formatDecimalCoordinates,
-        openInMaps
+        openInMaps,
+        setCustomLocation
     } = useLocationHandler();
 
+    const mapRef = useRef<MapView>(null);
     const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(currentLocation || null);
     const [manualCoords, setManualCoords] = useState({ lat: '', lng: '' });
     const [manualAddress, setManualAddress] = useState('');
@@ -48,6 +50,8 @@ export default function LocationPickerModal({
         longitudeDelta: 0.01,
     });
     const [isMapReady, setIsMapReady] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
+    const [isMapMoving, setIsMapMoving] = useState(false);
 
     const screenHeight = Dimensions.get('window').height;
 
@@ -63,17 +67,32 @@ export default function LocationPickerModal({
         }
     }, [currentLocation]);
 
+    // Update manual coordinates when location changes
+    useEffect(() => {
+        if (selectedLocation) {
+            setManualCoords({
+                lat: selectedLocation.latitude.toString(),
+                lng: selectedLocation.longitude.toString()
+            });
+        }
+    }, [selectedLocation]);
+
     const handleGetCurrentLocation = async () => {
         try {
             const location = await getCurrentLocation();
             if (location) {
                 setSelectedLocation(location);
-                setMapRegion({
+                const newRegion = {
                     latitude: location.latitude,
                     longitude: location.longitude,
                     latitudeDelta: 0.01,
                     longitudeDelta: 0.01,
-                });
+                };
+                setMapRegion(newRegion);
+                
+                // Animate map to new location
+                mapRef.current?.animateToRegion(newRegion, 1000);
+                
                 Alert.alert(
                     'Location Found!',
                     `Current location: ${location.address || 'Unknown address'}\n\nCoordinates: ${formatDecimalCoordinates(location.latitude, location.longitude)}`,
@@ -86,6 +105,8 @@ export default function LocationPickerModal({
     };
 
     const handleMapPress = (event: any) => {
+        if (isDragging || isMapMoving) return; // Don't handle map press while dragging or moving
+        
         const { coordinate } = event.nativeEvent;
         const location: LocationData = {
             latitude: coordinate.latitude,
@@ -96,52 +117,143 @@ export default function LocationPickerModal({
         setSelectedLocation(location);
         
         // Provide immediate feedback
-        console.log(`📍 Location selected: ${coordinate.latitude.toFixed(6)}, ${coordinate.longitude.toFixed(6)}`);
+        console.log(` Location selected: ${coordinate.latitude.toFixed(6)}, ${coordinate.longitude.toFixed(6)}`);
+    };
+
+    const handleMarkerDragStart = () => {
+        setIsDragging(true);
+        console.log('🎯 Started dragging marker');
+    };
+
+    const handleMarkerDrag = (event: any) => {
+        const { coordinate } = event.nativeEvent;
+        // Update coordinates in real-time while dragging
+        setManualCoords({
+            lat: coordinate.latitude.toFixed(6),
+            lng: coordinate.longitude.toFixed(6)
+        });
+    };
+
+    const handleMarkerDragEnd = (event: any) => {
+        const { coordinate } = event.nativeEvent;
+        const location: LocationData = {
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            address: `Location: ${coordinate.latitude.toFixed(6)}, ${coordinate.longitude.toFixed(6)}`,
+            timestamp: Date.now()
+        };
+        setSelectedLocation(location);
+        setIsDragging(false);
+        
+        console.log(`🎯 Marker dropped at: ${coordinate.latitude.toFixed(6)}, ${coordinate.longitude.toFixed(6)}`);
     };
 
     const handleMapReady = () => {
         setIsMapReady(true);
     };
 
+    const handleRegionChange = (region: Region) => {
+        setMapRegion(region);
+        setIsMapMoving(true);
+    };
+
+    const handleRegionChangeComplete = (region: Region) => {
+        setMapRegion(region);
+        setIsMapMoving(false);
+        
+        // Update manual coordinates to center of map when map stops moving
+        if (!isDragging && !selectedLocation) {
+            setManualCoords({
+                lat: region.latitude.toFixed(6),
+                lng: region.longitude.toFixed(6)
+            });
+        }
+    };
+
+    const validateCoordinates = (lat: string, lng: string): { isValid: boolean; errors: string[] } => {
+        const errors: string[] = [];
+        const latNum = parseFloat(lat);
+        const lngNum = parseFloat(lng);
+
+        if (isNaN(latNum)) {
+            errors.push('Latitude must be a valid number');
+        } else if (latNum < -90 || latNum > 90) {
+            errors.push('Latitude must be between -90 and 90 degrees');
+        }
+
+        if (isNaN(lngNum)) {
+            errors.push('Longitude must be a valid number');
+        } else if (lngNum < -180 || lngNum > 180) {
+            errors.push('Longitude must be between -180 and 180 degrees');
+        }
+
+        return { isValid: errors.length === 0, errors };
+    };
+
     const handleManualLocationEntry = () => {
+        const validation = validateCoordinates(manualCoords.lat, manualCoords.lng);
+        
+        if (!validation.isValid) {
+            Alert.alert('Invalid Coordinates', validation.errors.join('\n'));
+            return;
+        }
+
         const lat = parseFloat(manualCoords.lat);
         const lng = parseFloat(manualCoords.lng);
-
-        if (isNaN(lat) || isNaN(lng)) {
-            Alert.alert('Invalid Coordinates', 'Please enter valid latitude and longitude values.');
-            return;
-        }
-
-        if (lat < -90 || lat > 90) {
-            Alert.alert('Invalid Latitude', 'Latitude must be between -90 and 90 degrees.');
-            return;
-        }
-
-        if (lng < -180 || lng > 180) {
-            Alert.alert('Invalid Longitude', 'Longitude must be between -180 and 180 degrees.');
-            return;
-        }
 
         const location: LocationData = {
             latitude: lat,
             longitude: lng,
-            address: manualAddress.trim() || undefined,
+            address: manualAddress.trim() || '',
             timestamp: Date.now()
         };
 
         setSelectedLocation(location);
-        setMapRegion({
+        const newRegion = {
             latitude: lat,
             longitude: lng,
             latitudeDelta: 0.01,
             longitudeDelta: 0.01,
-        });
+        };
+        setMapRegion(newRegion);
+        
+        // Animate map to new location
+        mapRef.current?.animateToRegion(newRegion, 1000);
+        
         setIsManualEntry(false);
         Alert.alert(
             'Location Set!',
             `Location set to: ${manualAddress || 'Custom coordinates'}\n\nCoordinates: ${formatDecimalCoordinates(lat, lng)}`,
             [{ text: 'OK' }]
         );
+    };
+
+    const handleCoordinateChange = (field: 'lat' | 'lng', value: string) => {
+        setManualCoords(prev => ({ ...prev, [field]: value }));
+        
+        // Real-time validation feedback
+        const otherField = field === 'lat' ? 'lng' : 'lat';
+        const validation = validateCoordinates(
+            field === 'lat' ? value : manualCoords[otherField],
+            field === 'lng' ? value : manualCoords[otherField]
+        );
+        
+        // Update map preview if coordinates are valid
+        if (validation.isValid) {
+            const lat = parseFloat(field === 'lat' ? value : manualCoords.lat);
+            const lng = parseFloat(field === 'lng' ? value : manualCoords.lng);
+            
+            const newRegion = {
+                latitude: lat,
+                longitude: lng,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+            };
+            setMapRegion(newRegion);
+            
+            // Animate map to new location
+            mapRef.current?.animateToRegion(newRegion, 500);
+        }
     };
 
     const handleOpenWebMaps = () => {
@@ -156,6 +268,11 @@ export default function LocationPickerModal({
             Alert.alert('No Location Selected', 'Please select a location before confirming.');
             return;
         }
+        
+        // Set the custom location in the location handler so it can be used for searching
+        console.log('🗺️ LocationPickerModal - Setting custom location:', selectedLocation);
+        setCustomLocation(selectedLocation);
+        
         onLocationSelected(selectedLocation);
         onClose();
     };
@@ -163,12 +280,52 @@ export default function LocationPickerModal({
     const resetToCurrentLocation = () => {
         if (currentLocation) {
             setSelectedLocation(currentLocation);
-            setMapRegion({
+            const newRegion = {
                 latitude: currentLocation.latitude,
                 longitude: currentLocation.longitude,
                 latitudeDelta: 0.01,
                 longitudeDelta: 0.01,
-            });
+            };
+            setMapRegion(newRegion);
+            
+            // Animate map to current location
+            mapRef.current?.animateToRegion(newRegion, 1000);
+        }
+    };
+
+    const handleZoomIn = () => {
+        const newRegion = {
+            ...mapRegion,
+            latitudeDelta: mapRegion.latitudeDelta * 0.5,
+            longitudeDelta: mapRegion.longitudeDelta * 0.5,
+        };
+        setMapRegion(newRegion);
+        mapRef.current?.animateToRegion(newRegion, 300);
+    };
+
+    const handleZoomOut = () => {
+        const newRegion = {
+            ...mapRegion,
+            latitudeDelta: mapRegion.latitudeDelta * 2,
+            longitudeDelta: mapRegion.longitudeDelta * 2,
+        };
+        setMapRegion(newRegion);
+        mapRef.current?.animateToRegion(newRegion, 300);
+    };
+
+    const getCoordinateValidationStyle = (field: 'lat' | 'lng') => {
+        const value = manualCoords[field];
+        if (!value) return { borderColor: '#d1d5db' };
+        
+        const validation = validateCoordinates(
+            field === 'lat' ? value : manualCoords.lat,
+            field === 'lng' ? value : manualCoords.lng
+        );
+        
+        if (validation.isValid) {
+            return { borderColor: '#059669', borderWidth: 2 };
+        } else {
+            return { borderColor: '#dc2626', borderWidth: 2 };
         }
     };
 
@@ -276,9 +433,11 @@ export default function LocationPickerModal({
                                     </View>
                                 )}
                                 <MapView
+                                    ref={mapRef}
                                     style={{ flex: 1 }}
                                     region={mapRegion}
-                                    onRegionChangeComplete={setMapRegion}
+                                    onRegionChange={handleRegionChange}
+                                    onRegionChangeComplete={handleRegionChangeComplete}
                                     onPress={handleMapPress}
                                     showsUserLocation={true}
                                     showsMyLocationButton={true}
@@ -297,9 +456,52 @@ export default function LocationPickerModal({
                                             title="Selected Location"
                                             description={selectedLocation.address || "Selected plant location"}
                                             pinColor="#059669"
+                                            draggable={true}
+                                            onDragStart={handleMarkerDragStart}
+                                            onDrag={handleMarkerDrag}
+                                            onDragEnd={handleMarkerDragEnd}
                                         />
                                     )}
                                 </MapView>
+
+                                {/* Zoom Controls */}
+                                <View style={{
+                                    position: 'absolute',
+                                    top: 8,
+                                    right: 8,
+                                    backgroundColor: 'rgba(255,255,255,0.9)',
+                                    borderRadius: 8,
+                                    padding: 4
+                                }}>
+                                    <TouchableOpacity
+                                        style={{
+                                            backgroundColor: '#059669',
+                                            width: 32,
+                                            height: 32,
+                                            borderRadius: 6,
+                                            justifyContent: 'center',
+                                            alignItems: 'center',
+                                            marginBottom: 4
+                                        }}
+                                        onPress={handleZoomIn}
+                                    >
+                                        <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>+</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={{
+                                            backgroundColor: '#059669',
+                                            width: 32,
+                                            height: 32,
+                                            borderRadius: 6,
+                                            justifyContent: 'center',
+                                            alignItems: 'center'
+                                        }}
+                                        onPress={handleZoomOut}
+                                    >
+                                        <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>−</Text>
+                                    </TouchableOpacity>
+                                </View>
+
                                 <View style={{
                                     position: 'absolute',
                                     top: 8,
@@ -310,7 +512,7 @@ export default function LocationPickerModal({
                                     borderRadius: 6
                                 }}>
                                     <Text style={{ color: 'white', fontSize: 11, fontWeight: '600' }}>
-                                        📍 Tap anywhere to select location
+                                        📍 Tap to select or drag the pin
                                     </Text>
                                 </View>
                                 {selectedLocation && (
@@ -325,7 +527,7 @@ export default function LocationPickerModal({
                                         borderRadius: 6
                                     }}>
                                         <Text style={{ color: 'white', fontSize: 10, fontWeight: '600', textAlign: 'center' }}>
-                                            ✅ Location selected: {selectedLocation.latitude.toFixed(6)}, {selectedLocation.longitude.toFixed(6)}
+                                            {isDragging ? '🎯 Dragging...' : `✅ Location: ${selectedLocation.latitude.toFixed(6)}, ${selectedLocation.longitude.toFixed(6)}`}
                                         </Text>
                                     </View>
                                 )}
@@ -401,7 +603,7 @@ export default function LocationPickerModal({
                             )}
                         </View>
 
-                        {/* Simplified Manual Entry Form */}
+                        {/* Enhanced Manual Entry Form */}
                         {isManualEntry && (
                             <View style={{
                                 backgroundColor: '#f8fafc',
@@ -421,17 +623,16 @@ export default function LocationPickerModal({
                                             Latitude:
                                         </Text>
                                         <TextInput
-                                            style={{
+                                            style={[{
                                                 borderWidth: 1,
-                                                borderColor: '#d1d5db',
                                                 borderRadius: 6,
                                                 padding: 8,
                                                 fontSize: 12,
                                                 fontFamily: 'monospace'
-                                            }}
+                                            }, getCoordinateValidationStyle('lat')]}
                                             placeholder="40.785091"
                                             value={manualCoords.lat}
-                                            onChangeText={(text) => setManualCoords(prev => ({ ...prev, lat: text }))}
+                                            onChangeText={(text) => handleCoordinateChange('lat', text)}
                                             keyboardType="numeric"
                                         />
                                     </View>
@@ -441,31 +642,76 @@ export default function LocationPickerModal({
                                             Longitude:
                                         </Text>
                                         <TextInput
-                                            style={{
+                                            style={[{
                                                 borderWidth: 1,
-                                                borderColor: '#d1d5db',
                                                 borderRadius: 6,
                                                 padding: 8,
                                                 fontSize: 12,
                                                 fontFamily: 'monospace'
-                                            }}
+                                            }, getCoordinateValidationStyle('lng')]}
                                             placeholder="-73.968285"
                                             value={manualCoords.lng}
-                                            onChangeText={(text) => setManualCoords(prev => ({ ...prev, lng: text }))}
+                                            onChangeText={(text) => handleCoordinateChange('lng', text)}
                                             keyboardType="numeric"
                                         />
                                     </View>
                                 </View>
 
+                                {/* Address Input */}
+                                <View style={{ marginBottom: 10 }}>
+                                    <Text style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>
+                                        Address (optional):
+                                    </Text>
+                                    <TextInput
+                                        style={{
+                                            borderWidth: 1,
+                                            borderColor: '#d1d5db',
+                                            borderRadius: 6,
+                                            padding: 8,
+                                            fontSize: 12
+                                        }}
+                                        placeholder="e.g., Central Park, New York"
+                                        value={manualAddress}
+                                        onChangeText={setManualAddress}
+                                    />
+                                </View>
+
+                                {/* Validation Status */}
+                                {manualCoords.lat && manualCoords.lng && (
+                                    <View style={{
+                                        padding: 8,
+                                        borderRadius: 6,
+                                        marginBottom: 10,
+                                        backgroundColor: validateCoordinates(manualCoords.lat, manualCoords.lng).isValid ? '#f0fdf4' : '#fef2f2',
+                                        borderWidth: 1,
+                                        borderColor: validateCoordinates(manualCoords.lat, manualCoords.lng).isValid ? '#bbf7d0' : '#fecaca'
+                                    }}>
+                                        <Text style={{
+                                            fontSize: 11,
+                                            color: validateCoordinates(manualCoords.lat, manualCoords.lng).isValid ? '#166534' : '#dc2626',
+                                            fontWeight: '600'
+                                        }}>
+                                            {validateCoordinates(manualCoords.lat, manualCoords.lng).isValid ? '✅ Valid coordinates' : '❌ Invalid coordinates'}
+                                        </Text>
+                                        {!validateCoordinates(manualCoords.lat, manualCoords.lng).isValid && (
+                                            <Text style={{ fontSize: 10, color: '#dc2626', marginTop: 2 }}>
+                                                {validateCoordinates(manualCoords.lat, manualCoords.lng).errors.join(', ')}
+                                            </Text>
+                                        )}
+                                    </View>
+                                )}
+
                                 <TouchableOpacity
                                     style={{
-                                        backgroundColor: '#059669',
+                                        backgroundColor: validateCoordinates(manualCoords.lat, manualCoords.lng).isValid ? '#059669' : '#9ca3af',
                                         paddingVertical: 8,
                                         paddingHorizontal: 12,
                                         borderRadius: 6,
-                                        alignItems: 'center'
+                                        alignItems: 'center',
+                                        opacity: validateCoordinates(manualCoords.lat, manualCoords.lng).isValid ? 1 : 0.6
                                     }}
                                     onPress={handleManualLocationEntry}
+                                    disabled={!validateCoordinates(manualCoords.lat, manualCoords.lng).isValid}
                                 >
                                     <Text style={{ color: 'white', fontWeight: '600', fontSize: 12 }}>
                                         ✅ Set Location

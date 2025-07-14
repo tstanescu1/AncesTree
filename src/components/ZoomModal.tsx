@@ -98,7 +98,7 @@ export default function ZoomModal({ visible, imageUri, onClose }: ZoomModalProps
                             elevation: 10,
                         }}>
                             <Image 
-                                source={{ uri: imageUri }} 
+                                source={{ uri: imageUri.startsWith('data:') ? imageUri : `data:image/jpeg;base64,${imageUri}` }} 
                                 style={{ 
                                     width: screenWidth * 0.9, 
                                     height: screenHeight * 0.6,

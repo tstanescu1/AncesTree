@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Alert, Linking, Platform } from 'react-native';
 import * as Location from 'expo-location';
+import { useLocationContext } from './LocationContext';
 
 export interface LocationData {
     latitude: number;
@@ -11,7 +12,7 @@ export interface LocationData {
 }
 
 export const useLocationHandler = () => {
-    const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
+    const { currentLocation, setCurrentLocation } = useLocationContext();
     const [locationPermission, setLocationPermission] = useState<Location.PermissionStatus | null>(null);
     const [loadingLocation, setLoadingLocation] = useState(false);
 
@@ -114,6 +115,10 @@ export const useLocationHandler = () => {
         }
     };
 
+    const setCustomLocation = (location: LocationData) => {
+        setCurrentLocation(location);
+    };
+
     const formatCoordinates = (lat: number, lng: number): string => {
         const formatCoord = (coord: number, isLat: boolean) => {
             const abs = Math.abs(coord);
@@ -174,6 +179,7 @@ export const useLocationHandler = () => {
         checkLocationPermission,
         requestLocationPermission,
         getCurrentLocation,
+        setCustomLocation,
         formatCoordinates,
         formatDecimalCoordinates,
         openInMaps,

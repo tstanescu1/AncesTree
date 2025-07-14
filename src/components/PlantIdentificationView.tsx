@@ -101,224 +101,100 @@ export default function PlantIdentificationView({
         <>
             <Text style={{ fontSize: 30, fontWeight: 'bold', color: '#166534', marginBottom: 24 }}>🌿 AncesTree</Text>
 
-            {/* Location Section - Compact design with vertical buttons */}
-            <View style={{ 
+            {/* Location Section - Revamped, compact, single-row layout */}
+            <View style={{
                 width: '100%',
-                marginBottom: 16, 
-                backgroundColor: 'white', 
-                borderRadius: 12, 
-                padding: 16,
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.1,
-                shadowRadius: 8,
-                elevation: 4,
+                marginBottom: 10,
+                backgroundColor: 'white',
+                borderRadius: 8,
+                padding: 8,
                 borderWidth: 1,
-                borderColor: '#e5e7eb'
+                borderColor: '#e5e7eb',
+                flexDirection: 'row',
+                alignItems: 'center',
+                minHeight: 44
             }}>
-                {/* Current location display with inline Clear button and vertical action buttons */}
-                {(useCurrentLocation && currentLocation) || selectedLocation ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-                        {/* Location info - takes most space */}
-                        <View style={{
-                            flex: 1,
-                            backgroundColor: '#f0fdf4',
-                            padding: 16,
-                            borderRadius: 10,
-                            borderWidth: 1,
-                            borderColor: '#bbf7d0',
-                            minHeight: 90
-                        }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
-                                <Text style={{ fontSize: 13, color: '#166534', fontWeight: '600', flex: 1, lineHeight: 18 }}>
-                                    {useCurrentLocation ? '📍 Current GPS location' : '📌 Selected location'}
-                                </Text>
-                                <TouchableOpacity
-                                    style={{
-                                        backgroundColor: '#f3f4f6',
-                                        paddingHorizontal: 10,
-                                        paddingVertical: 5,
-                                        borderRadius: 6,
-                                        borderWidth: 1,
-                                        borderColor: '#d1d5db',
-                                        marginLeft: 12
-                                    }}
-                                    onPress={() => {
-                                        setSelectedLocation(null);
-                                        setUseCurrentLocation(false);
-                                    }}
-                                >
-                                    <Text style={{ color: '#6b7280', fontSize: 11, fontWeight: '600' }}>Clear</Text>
-                                </TouchableOpacity>
-                            </View>
-                            {((useCurrentLocation && currentLocation) || selectedLocation) && (
-                                <>
-                                    {(useCurrentLocation ? currentLocation?.address : selectedLocation?.address) && (
-                                        <Text style={{ 
-                                            fontSize: 13, 
-                                            color: '#374151', 
-                                            marginBottom: 8,
-                                            lineHeight: 19,
-                                            flexWrap: 'wrap'
-                                        }} numberOfLines={4}>
-                                            {useCurrentLocation ? currentLocation?.address : selectedLocation?.address}
-                                        </Text>
-                                    )}
-                                    <Text style={{ 
-                                        fontSize: 11, 
-                                        color: '#6b7280', 
-                                        fontFamily: 'monospace',
-                                        lineHeight: 16
-                                    }}>
-                                        {formatDecimalCoordinates(
-                                            useCurrentLocation ? (currentLocation?.latitude || 0) : (selectedLocation?.latitude || 0),
-                                            useCurrentLocation ? (currentLocation?.longitude || 0) : (selectedLocation?.longitude || 0)
-                                        )}
-                                    </Text>
-                                </>
-                            )}
-                        </View>
-
-                        {/* Vertical action buttons - compact on the right */}
-                        <View style={{ gap: 10, alignItems: 'center' }}>
+                {/* Left: Location info */}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                        <Text style={{ fontSize: 15, marginRight: 4 }}>
+                            {useCurrentLocation ? '📍' : selectedLocation ? '📌' : '📍'}
+                        </Text>
+                        <Text style={{ fontSize: 12, color: '#166534', fontWeight: '600', marginRight: 4 }} numberOfLines={1}>
+                            {useCurrentLocation ? 'Current GPS' : selectedLocation ? 'Selected location' : 'No location'}
+                        </Text>
+                        {(useCurrentLocation || selectedLocation) && (
                             <TouchableOpacity
-                                style={{
-                                    backgroundColor: '#0ea5e9',
-                                    paddingVertical: 12,
-                                    paddingHorizontal: 16,
-                                    borderRadius: 8,
-                                    alignItems: 'center',
-                                    minWidth: 80,
-                                    minHeight: 40
+                                style={{ marginLeft: 2, padding: 2, borderRadius: 10 }}
+                                onPress={() => {
+                                    setSelectedLocation(null);
+                                    setUseCurrentLocation(false);
                                 }}
-                                onPress={async () => {
-                                    console.log('🔍 GPS button clicked - setting useCurrentLocation to true');
-                                    setUseCurrentLocation(true);
-                                    try {
-                                        console.log('🔍 Calling getCurrentLocation()...');
-                                        const location = await getCurrentLocation();
-                                        console.log('🔍 getCurrentLocation() returned:', location);
-                                        if (location) {
-                                            console.log('🔍 Setting selectedLocation to:', location);
-                                            setSelectedLocation(location); // Store GPS location in selectedLocation state
-                                            console.log('🔍 selectedLocation set successfully');
-                                        } else {
-                                            console.log('🔍 No location returned from getCurrentLocation()');
-                                        }
-                                    } catch (error) {
-                                        console.warn('🔍 Failed to get GPS location:', error);
-                                    }
-                                }}
+                                accessibilityLabel="Clear location"
                             >
-                                {loadingLocation && useCurrentLocation ? (
-                                    <ActivityIndicator size="small" color="white" />
-                                ) : (
-                                    <Text style={{ fontSize: 16, marginBottom: 3 }}>📍</Text>
-                                )}
-                                <Text style={{ color: 'white', fontWeight: '600', fontSize: 11, textAlign: 'center' }}>
-                                    {loadingLocation && useCurrentLocation ? 'GPS...' : 'GPS'}
-                                </Text>
+                                <Text style={{ fontSize: 13, color: '#6b7280' }}>✕</Text>
                             </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={{
-                                    backgroundColor: '#059669',
-                                    paddingVertical: 12,
-                                    paddingHorizontal: 16,
-                                    borderRadius: 8,
-                                    alignItems: 'center',
-                                    minWidth: 80,
-                                    minHeight: 40
-                                }}
-                                onPress={handleOpenLocationPicker}
-                            >
-                                <Text style={{ fontSize: 16, marginBottom: 3 }}>🗺️</Text>
-                                <Text style={{ color: 'white', fontWeight: '600', fontSize: 11, textAlign: 'center' }}>
-                                    Choose
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
+                        )}
                     </View>
-                ) : (
-                    // No location state - horizontal layout with warning
-                    <View>
-                        <View style={{
-                            backgroundColor: '#fef3c7',
-                            padding: 14,
+                    {((useCurrentLocation && currentLocation) || selectedLocation) ? (
+                        <Text
+                            style={{ fontSize: 11, color: '#374151', flexShrink: 1 }}
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
+                        >
+                            {(useCurrentLocation ? currentLocation?.address : selectedLocation?.address) ||
+                                formatDecimalCoordinates(
+                                    useCurrentLocation ? (currentLocation?.latitude || 0) : (selectedLocation?.latitude || 0),
+                                    useCurrentLocation ? (currentLocation?.longitude || 0) : (selectedLocation?.longitude || 0)
+                                )}
+                        </Text>
+                    ) : (
+                        <Text style={{ fontSize: 11, color: '#9ca3af' }}>
+                            No location selected
+                        </Text>
+                    )}
+                </View>
+                {/* Right: Two small icon buttons */}
+                <View style={{ flexDirection: 'row', gap: 6, marginLeft: 8 }}>
+                    <TouchableOpacity
+                        style={{
+                            width: 36,
+                            height: 36,
+                            backgroundColor: '#0ea5e9',
                             borderRadius: 8,
-                            marginBottom: 14,
-                            borderWidth: 1,
-                            borderColor: '#f59e0b'
-                        }}>
-                            <Text style={{ fontSize: 12, color: '#92400e', textAlign: 'center', lineHeight: 18 }}>
-                                📍 No location selected - plant will be saved without location data
-                            </Text>
-                        </View>
-                        
-                        <View style={{ flexDirection: 'row', gap: 12 }}>
-                            <TouchableOpacity
-                                style={{
-                                    flex: 1,
-                                    backgroundColor: '#0ea5e9',
-                                    paddingVertical: 14,
-                                    paddingHorizontal: 16,
-                                    borderRadius: 8,
-                                    alignItems: 'center',
-                                    flexDirection: 'row',
-                                    justifyContent: 'center',
-                                    minHeight: 48
-                                }}
-                                onPress={async () => {
-                                    console.log('🔍 GPS button clicked - setting useCurrentLocation to true');
-                                    setUseCurrentLocation(true);
-                                    try {
-                                        console.log('🔍 Calling getCurrentLocation()...');
-                                        const location = await getCurrentLocation();
-                                        console.log('🔍 getCurrentLocation() returned:', location);
-                                        if (location) {
-                                            console.log('🔍 Setting selectedLocation to:', location);
-                                            setSelectedLocation(location); // Store GPS location in selectedLocation state
-                                            console.log('🔍 selectedLocation set successfully');
-                                        } else {
-                                            console.log('🔍 No location returned from getCurrentLocation()');
-                                        }
-                                    } catch (error) {
-                                        console.warn('🔍 Failed to get GPS location:', error);
-                                    }
-                                }}
-                            >
-                                {loadingLocation && useCurrentLocation ? (
-                                    <ActivityIndicator size="small" color="white" style={{ marginRight: 10 }} />
-                                ) : (
-                                    <Text style={{ fontSize: 16, marginRight: 10 }}>📍</Text>
-                                )}
-                                <Text style={{ color: 'white', fontWeight: '600', fontSize: 14 }}>
-                                    {loadingLocation && useCurrentLocation ? 'Getting GPS...' : 'Use GPS'}
-                                </Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={{
-                                    flex: 1,
-                                    backgroundColor: '#059669',
-                                    paddingVertical: 14,
-                                    paddingHorizontal: 16,
-                                    borderRadius: 8,
-                                    alignItems: 'center',
-                                    flexDirection: 'row',
-                                    justifyContent: 'center',
-                                    minHeight: 48
-                                }}
-                                onPress={handleOpenLocationPicker}
-                            >
-                                <Text style={{ fontSize: 16, marginRight: 10 }}>🗺️</Text>
-                                <Text style={{ color: 'white', fontWeight: '600', fontSize: 14 }}>
-                                    Choose on Map
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                )}
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                        }}
+                        onPress={async () => {
+                            setUseCurrentLocation(true);
+                            try {
+                                const location = await getCurrentLocation();
+                                if (location) setSelectedLocation(location);
+                            } catch (error) { console.warn(error); }
+                        }}
+                        accessibilityLabel="Use GPS location"
+                    >
+                        {loadingLocation && useCurrentLocation ? (
+                            <ActivityIndicator size="small" color="white" />
+                        ) : (
+                            <Text style={{ fontSize: 18 }}>📍</Text>
+                        )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={{
+                            width: 36,
+                            height: 36,
+                            backgroundColor: '#059669',
+                            borderRadius: 8,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                        }}
+                        onPress={handleOpenLocationPicker}
+                        accessibilityLabel="Choose location on map"
+                    >
+                        <Text style={{ fontSize: 18 }}>🗺️</Text>
+                    </TouchableOpacity>
+                </View>
             </View>
 
             {/* Multi-Photo Mode Toggle */}
@@ -496,7 +372,7 @@ export default function PlantIdentificationView({
                                     textShadowRadius: 2,
                                     marginBottom: 2
                                 }}>
-                                    Identify Plant
+                                    Identify Nature
                                 </Text>
                                 <Text style={{ 
                                     color: 'rgba(255, 255, 255, 0.9)', 
@@ -674,7 +550,7 @@ export default function PlantIdentificationView({
                                         textShadowOffset: { width: 1, height: 1 },
                                         textShadowRadius: 2
                                     }}>
-                                        Identify Plant
+                                        Identify Nature
                                     </Text>
                                 </View>
                                 
@@ -915,7 +791,7 @@ export default function PlantIdentificationView({
                                 >
                                     {recentPlant.latestUserPhoto && (
                                         <Image 
-                                            source={{ uri: recentPlant.latestUserPhoto }} 
+                                            source={{ uri: recentPlant.latestUserPhoto.startsWith('data:') ? recentPlant.latestUserPhoto : `data:image/jpeg;base64,${recentPlant.latestUserPhoto}` }} 
                                             style={{ 
                                                 width: 40, 
                                                 height: 40, 

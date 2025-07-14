@@ -13,8 +13,10 @@ import type {
   FilterApi,
   FunctionReference,
 } from "convex/server";
+import type * as chatSystem from "../chatSystem.js";
 import type * as identifyPlant from "../identifyPlant.js";
 import type * as index from "../index.js";
+import type * as medicinalQA from "../medicinalQA.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -25,8 +27,10 @@ import type * as index from "../index.js";
  * ```
  */
 declare const fullApi: ApiFromModules<{
+  chatSystem: typeof chatSystem;
   identifyPlant: typeof identifyPlant;
   index: typeof index;
+  medicinalQA: typeof medicinalQA;
 }>;
 export declare const api: FilterApi<
   typeof fullApi,

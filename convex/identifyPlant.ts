@@ -726,9 +726,18 @@ export const confirmPlantSelection = action({
       accuracy: v.optional(v.number()),
       timestamp: v.optional(v.number()),
     })),
+    // Add medicinal details for each sighting
+    medicinalDetails: v.optional(v.object({
+      medicinalUses: v.optional(v.array(v.string())),
+      preparationMethods: v.optional(v.array(v.string())),
+      partsUsed: v.optional(v.array(v.string())),
+      dosageNotes: v.optional(v.string()),
+      sourceAttribution: v.optional(v.string()),
+      userExperience: v.optional(v.string()),
+    })),
   },
 
-  handler: async (ctx, { selectedSuggestion, userPhotoBase64, userPhotos, userFeedback, location }): Promise<{
+  handler: async (ctx, { selectedSuggestion, userPhotoBase64, userPhotos, userFeedback, location, medicinalDetails }): Promise<{
     plantId: any;
     scientificName: string;
     commonNames: string[];
@@ -766,7 +775,14 @@ export const confirmPlantSelection = action({
       imageUrl,
       userPhotos: photosToSave,
       similar_images: similar_images || [],
-      location,
+      location: location ? {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        address: location.address ?? '',
+        accuracy: location.accuracy ?? 0,
+        timestamp: location.timestamp ?? Date.now(),
+      } : undefined,
+      medicinalDetails: medicinalDetails || undefined,
     });
 
     // Trigger GPT extraction for advanced fields
@@ -1107,9 +1123,17 @@ export const storePlantData = internalMutation({
       accuracy: v.number(),
       timestamp: v.number()
     })),
-    pests: v.optional(v.array(v.string()))
+    pests: v.optional(v.array(v.string())),
+    medicinalDetails: v.optional(v.object({
+      medicinalUses: v.optional(v.array(v.string())),
+      preparationMethods: v.optional(v.array(v.string())),
+      partsUsed: v.optional(v.array(v.string())),
+      dosageNotes: v.optional(v.string()),
+      sourceAttribution: v.optional(v.string()),
+      userExperience: v.optional(v.string()),
+    }))
   },
-  handler: async (ctx, { scientificName, commonNames, wikiUrl, medicinalTags, traditionalUsage, imageUrl, userPhotos, similar_images, description, location, pests }) => {
+  handler: async (ctx, { scientificName, commonNames, wikiUrl, medicinalTags, traditionalUsage, imageUrl, userPhotos, similar_images, description, location, pests, medicinalDetails }) => {
     /* ---------- Upsert into `plants` ---------- */
     let plantId;
     const existingPlant = await ctx.db
@@ -1169,10 +1193,10 @@ export const storePlantData = internalMutation({
       });
     }
 
-    /* ---------- Record sightings with all user photos and location ---------- */
+    /* ---------- Record sightings with all user photos, location, and medicinal details ---------- */
     const photosToProcess = userPhotos && userPhotos.length > 0 ? userPhotos : [];
     for (const photoUri of photosToProcess) {
-      const sightingData = {
+      const sightingData: any = {
         plantId,
         photoUri,
         identifiedAt: Date.now(),
@@ -1185,6 +1209,18 @@ export const storePlantData = internalMutation({
           address: location.address,
           accuracy: location.accuracy,
           locationTimestamp: location.timestamp
+        });
+      }
+
+      // Add medicinal details if provided
+      if (medicinalDetails) {
+        Object.assign(sightingData, {
+          medicinalUses: medicinalDetails.medicinalUses || [],
+          preparationMethods: medicinalDetails.preparationMethods || [],
+          partsUsed: medicinalDetails.partsUsed || [],
+          dosageNotes: medicinalDetails.dosageNotes || '',
+          sourceAttribution: medicinalDetails.sourceAttribution || '',
+          userExperience: medicinalDetails.userExperience || '',
         });
       }
 
@@ -1213,23 +1249,29 @@ export const getAllPlants = query({
     // For each plant, get the most recent user photo and all sightings
     const plantsWithPhotos = await Promise.all(
       plants.map(async (plant) => {
-        const latestSighting = await ctx.db
-          .query("sightings")
-          .withIndex("plantId", (q) => q.eq("plantId", plant._id))
-          .order("desc")
-          .first();
-        
         const allSightings = await ctx.db
           .query("sightings")
           .withIndex("plantId", (q) => q.eq("plantId", plant._id))
           .order("desc")
           .collect();
         
+        // Determine the best photo to show:
+        // 1. If plant.imageUrl is a user photo (starts with data:image), use it
+        // 2. Otherwise, use the most recent user photo
+        let displayPhoto = null;
+        if (plant.imageUrl && plant.imageUrl.startsWith('data:image')) {
+          // The plant's imageUrl is a user photo, so use it
+          displayPhoto = plant.imageUrl;
+        } else if (allSightings.length > 0) {
+          // Use the most recent user photo
+          displayPhoto = allSightings[0]?.photoUri || null;
+        }
+        
         return {
           ...plant,
-          latestUserPhoto: latestSighting?.photoUri || null,
+          latestUserPhoto: displayPhoto,
           sightingsCount: allSightings.length,
-          lastSeen: latestSighting?.identifiedAt,
+          lastSeen: allSightings[0]?.identifiedAt,
           allSightings: allSightings, // Include all sightings for location data
         };
       })
@@ -1261,7 +1303,7 @@ export const getPlantById = query({
         sightingsCount: sightings.length,
         lastSeen: sightings[0]?.identifiedAt,
         allSightings: sightings,
-        userPhotos: sightings.map(s => s.photoUri).filter(uri => uri), // All user photos
+        userPhotos: sightings.map(s => s.photoUri).filter(uri => uri), // All user photos for backward compatibility
       };
     } catch (error) {
       console.error("Error fetching plant:", error);
@@ -1293,7 +1335,7 @@ export const getPlantDetailsByName = query({
       sightingsCount: sightings.length,
       lastSeen: sightings[0]?.identifiedAt,
       allSightings: sightings,
-      userPhotos: sightings.map(s => s.photoUri).filter(uri => uri),
+      userPhotos: sightings.map(s => s.photoUri).filter(uri => uri), // All user photos for backward compatibility
     };
   },
 });
@@ -2125,6 +2167,15 @@ export const setDefaultPhotoInternal = internalMutation({
       
       console.log(`✅ Successfully updated sighting ${sightingId} timestamp to ${newestTimestamp}`);
       
+      // Also update the plant's imageUrl to use this sighting's photo
+      const plant = await ctx.db.get(plantId);
+      if (plant) {
+        await ctx.db.patch(plantId, {
+          imageUrl: targetSighting.photoUri,
+        });
+        console.log(`🖼️ Updated plant ${plantId} imageUrl to: ${targetSighting.photoUri}`);
+      }
+      
       // Verify the update worked
       const updatedSightings = await ctx.db
         .query("sightings")
@@ -2420,4 +2471,168 @@ export const extractAndUpdateAdvancedPlantProfile = action({
     await ctx.runMutation(internal.identifyPlant.patchPlantFieldsInternal, { plantId, fields });
     return { success: true, updated: fields };
   }
+});
+
+// Add location data to an existing plant entry
+export const addLocationToPlant = action({
+  args: {
+    plantId: v.id("plants"),
+    latitude: v.number(),
+    longitude: v.number(),
+    address: v.optional(v.string()),
+    accuracy: v.optional(v.number()),
+  },
+  
+  handler: async (ctx, { plantId, latitude, longitude, address, accuracy }): Promise<{
+    success: boolean;
+    sightingId?: any;
+    message?: string;
+    error?: string;
+  }> => {
+    try {
+      // Use the correct internal function name
+      const plant = await ctx.runQuery(internal.identifyPlant.getPlantByIdInternal, { plantId });
+      if (!plant) {
+        throw new Error("Plant not found");
+      }
+
+      // Create a new sighting with the location data
+      const sightingId = await ctx.runMutation(internal.identifyPlant.createSightingWithLocation, {
+        plantId,
+        latitude,
+        longitude,
+        address: address ?? '', // always provide a string
+        accuracy: accuracy ?? 0, // always provide a number
+        identifiedAt: Date.now(),
+      });
+
+      return {
+        success: true,
+        sightingId,
+        message: "Location added successfully",
+      };
+    } catch (error) {
+      console.error("Error adding location to plant:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to add location",
+      };
+    }
+  },
+});
+
+// Internal mutation to create a sighting with location data
+export const createSightingWithLocation = internalMutation({
+  args: {
+    plantId: v.id("plants"),
+    latitude: v.number(),
+    longitude: v.number(),
+    address: v.optional(v.string()),
+    accuracy: v.optional(v.number()),
+    identifiedAt: v.number(),
+  },
+  
+  handler: async (ctx, { plantId, latitude, longitude, address, accuracy, identifiedAt }): Promise<any> => {
+    // Create the sighting with a placeholder photo URI since it's required by schema
+    const sightingId = await ctx.db.insert("sightings", {
+      plantId,
+      photoUri: "location_only_entry", // Placeholder since photoUri is required
+      latitude,
+      longitude,
+      address: address ?? '', // always provide a string
+      accuracy: accuracy ?? 0, // always provide a number
+      identifiedAt,
+      locationTimestamp: identifiedAt,
+    });
+
+    return sightingId;
+  },
+});
+
+// Generate AI-powered confirmation questions for plant identification
+export const generateConfirmationQuestions = action({
+  args: {
+    scientificName: v.string(),
+    description: v.string(),
+    userPhotoBase64: v.string(),
+    imageUrl: v.optional(v.string()),
+  },
+  
+  handler: async (ctx, { scientificName, description, userPhotoBase64, imageUrl }): Promise<{
+    questions: Array<{
+      id: string;
+      question: string;
+      options: string[];
+      correctAnswer: string;
+      reasoning: string;
+    }>;
+  }> => {
+    console.log(`🤖 Generating confirmation questions for ${scientificName}`);
+    
+    try {
+      // Call OpenAI to generate specific, distinguishing questions
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "system",
+              content: `You are a botanical expert specializing in plant identification. Your task is to generate 3-4 specific, distinguishing questions that help confirm if a user's photo matches a particular plant species.
+
+IMPORTANT GUIDELINES:
+1. Focus on VISIBLE morphological features that can be observed in photos
+2. Ask about specific, distinguishing characteristics that differentiate this species from similar ones
+3. Include questions about leaf texture, shape, color, flower characteristics, growth pattern, etc.
+4. Make questions clear and answerable by someone looking at a photo
+5. Provide 3-4 multiple choice options for each question
+6. Include reasoning for why each question helps with identification
+
+Return ONLY a JSON array with this exact structure:
+[
+  {
+    "id": "unique_id_1",
+    "question": "What is the texture of the leaves?",
+    "options": ["Smooth", "Hairy", "Rough", "Waxy"],
+    "correctAnswer": "Hairy",
+    "reasoning": "This species has distinctive fine hairs on the leaf surface that are visible in good photos"
+  }
+]
+
+Plant: ${scientificName}
+Description: ${description}`
+            }
+          ],
+          temperature: 0.7,
+          max_tokens: 1000
+        })
+      });
+
+      if (!response.ok) {
+        console.error('❌ OpenAI API error:', await response.text());
+        throw new Error('Failed to generate confirmation questions');
+      }
+
+      const data = await response.json();
+      const content = data.choices[0].message.content;
+      console.log('📦 Raw OpenAI confirmation questions:', content);
+
+      try {
+        const questions = JSON.parse(content);
+        console.log(`✅ Generated ${questions.length} confirmation questions`);
+        
+        return { questions };
+      } catch (error) {
+        console.error('❌ Error parsing confirmation questions:', error);
+        throw new Error('Failed to parse confirmation questions');
+      }
+    } catch (error) {
+      console.error('❌ Error generating confirmation questions:', error);
+      throw new Error('Failed to generate confirmation questions');
+    }
+  },
 });

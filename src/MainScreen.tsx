@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Clipboard, Alert } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, Alert, Clipboard, Modal } from "react-native";
 import { api } from "../convex/_generated/api";
 import { useAction, useQuery } from "convex/react";
 
@@ -9,6 +9,7 @@ import PlantCollectionView from './components/PlantCollectionView';
 import PlantDetailView from './components/PlantDetailView';
 import ZoomModal from './components/ZoomModal';
 import PlantSuggestionsView from './components/PlantSuggestionsView';
+import FullscreenMapModal from './components/FullscreenMapModal';
 
 // Import custom hooks
 import { useImageHandler } from './hooks/useImageHandler';
@@ -44,6 +45,7 @@ export default function MainScreen() {
     const [editPreviewMode, setEditPreviewMode] = useState(false);
     const [textSelection, setTextSelection] = useState({ start: 0, end: 0 });
     const [showSafetyInfo, setShowSafetyInfo] = useState(false);
+    const [collectionRefreshTrigger, setCollectionRefreshTrigger] = useState(0);
 
     // State for multiple plant suggestions
     const [plantSuggestions, setPlantSuggestions] = useState<any[]>([]);
@@ -103,22 +105,25 @@ export default function MainScreen() {
     const addPlantFeedback = useAction(api.identifyPlant.addPlantFeedback);
     const editPlantFeedback = useAction(api.identifyPlant.editPlantFeedback);
     const extractAdvancedFields = useAction(api.identifyPlant.extractAndUpdateAdvancedPlantProfile);
+    const addLocationToPlant = useAction(api.identifyPlant.addLocationToPlant);
 
     // Custom hooks
     const { compressImage, requestPermissions, launchCamera, launchImageLibrary, showImageSourceAlert } = useImageHandler();
 
     // Helper function to get current location data
     const getCurrentLocationData = (): LocationData | null => {
-        // Return selectedLocation which contains either:
-        // - GPS location (when useCurrentLocation=true and GPS button was clicked)
-        // - Map-selected location (when user picked location on map)
+        // If useCurrentLocation is true, use the current GPS location
+        // Otherwise, use the selected location from the map
+        if (useCurrentLocation && currentLocation) {
+            return currentLocation;
+        }
         return selectedLocation;
     };
 
     // Helper functions
     const getAllUniqueTags = () => {
         if (!plants) return [];
-        const allTags = plants.flatMap(plant => plant.medicinalTags);
+        const allTags = plants.flatMap(plant => plant.medicinalTags || []);
         return [...new Set(allTags)];
     };
 
@@ -194,6 +199,16 @@ Collected with AncesTree 🌿📱`;
             
             setCurrentPhotoBase64(base64); // Store for later use
             setCurrentCapturedPhotos([]); // Clear multi-photo state for single photo mode
+            
+            // Store location from image if found
+            if (location) {
+                console.log('📍 GPS location found in image:', location);
+                setSelectedLocation({
+                    latitude: location.latitude,
+                    longitude: location.longitude,
+                    timestamp: location.timestamp,
+                });
+            }
             
             // Identify the plant
             const result = await identify({ base64 });
@@ -294,6 +309,10 @@ Collected with AncesTree 🌿📱`;
                 setPlant(null); // Clear single plant result
                 setCurrentPhotoBase64(capturedPhotos[0]); // Use first photo as representative
                 setCurrentCapturedPhotos([...capturedPhotos]); // Store all photos for later use
+                
+                // Note: For multi-photo mode, we don't automatically set location
+                // as different photos might have different GPS data
+                // User can manually set location if needed
             } else {
                 throw new Error("No plant match found");
             }
@@ -380,7 +399,12 @@ Collected with AncesTree 🌿📱`;
             
             await addPhotoDirectly({ 
                 plantId: plantDetail._id, 
-                userPhotoBase64: base64 
+                userPhotoBase64: base64,
+                location: location ? {
+                    latitude: location.latitude,
+                    longitude: location.longitude,
+                    timestamp: location.timestamp,
+                } : undefined
             });
             
             // Refresh the plant detail view automatically
@@ -478,7 +502,7 @@ Collected with AncesTree 🌿📱`;
             if (result.success) {
                 console.log('✅ Default photo set successfully, starting refresh...');
                 
-                // Force refresh plant data
+                // Force refresh plant data for detail view
                 const currentId = selectedPlantId;
                 console.log(`🔄 Refreshing plant data: clearing selectedPlantId`);
                 setSelectedPlantId(null);
@@ -486,6 +510,11 @@ Collected with AncesTree 🌿📱`;
                 console.log(`🔄 Refreshing plant data: setting selectedPlantId back to ${currentId}`);
                 setSelectedPlantId(currentId);
                 console.log(`✅ Plant data refresh complete`);
+                
+                // Force refresh collection view data by triggering a re-render
+                console.log(`🔄 Forcing collection view refresh...`);
+                setCollectionRefreshTrigger(prev => prev + 1);
+                console.log(`✅ Collection view refresh triggered`);
             } else {
                 console.error('❌ Failed to set default photo:', result);
                 Alert.alert('Error', 'Failed to set default photo');
@@ -522,6 +551,11 @@ Collected with AncesTree 🌿📱`;
                 console.log(`🔄 Refreshing plant data: setting selectedPlantId back to ${currentId}`);
                 setSelectedPlantId(currentId);
                 console.log(`✅ Plant data refresh complete`);
+                
+                // Force refresh collection view data
+                console.log(`🔄 Forcing collection view refresh...`);
+                setCollectionRefreshTrigger(prev => prev + 1);
+                console.log(`✅ Collection view refresh triggered`);
             } else {
                 console.error('❌ Failed to set database image as default:', result);
                 Alert.alert('Error', 'Failed to set database image as default photo');
@@ -597,7 +631,7 @@ Collected with AncesTree 🌿📱`;
     };
 
     // Handler for when user selects a plant from suggestions
-    const handlePlantSelection = async (selectedSuggestion: any, feedback?: string, location?: LocationData | null) => {
+    const handlePlantSelection = async (selectedSuggestion: any, feedback?: string, location?: LocationData | null, medicinalDetails?: any) => {
         setLoading(true);
         try {
             // Use the location passed from PlantSuggestionsView, fallback to getCurrentLocationData() if not provided
@@ -606,19 +640,20 @@ Collected with AncesTree 🌿📱`;
             // Determine if this was from multi-photo mode and pass all photos
             const isFromMultiPhoto = currentCapturedPhotos.length > 0;
             
-            const result = await confirmPlantSelection({
-                selectedSuggestion: {
-                    scientificName: selectedSuggestion.scientificName,
-                    commonNames: selectedSuggestion.commonNames,
-                    description: selectedSuggestion.description,
-                    wikiUrl: selectedSuggestion.wikiUrl,
-                    imageUrl: selectedSuggestion.imageUrl,
-                    similar_images: selectedSuggestion.similar_images, // Pass preview images to save them
-                },
-                userPhotoBase64: isFromMultiPhoto ? undefined : currentPhotoBase64, // Use single photo for single-photo mode
-                userPhotos: isFromMultiPhoto ? currentCapturedPhotos : undefined, // Use all photos for multi-photo mode
-                userFeedback: feedback,
-                location: locationToUse || undefined, // Pass the location data, converting null to undefined
+                        const result = await confirmPlantSelection({
+              selectedSuggestion: {
+                scientificName: selectedSuggestion.scientificName,
+                commonNames: selectedSuggestion.commonNames,
+                description: selectedSuggestion.description,
+                wikiUrl: selectedSuggestion.wikiUrl,
+                imageUrl: selectedSuggestion.imageUrl,
+                similar_images: selectedSuggestion.similar_images, // Pass preview images to save them
+              },
+              userPhotoBase64: isFromMultiPhoto ? undefined : currentPhotoBase64, // Use single photo for single-photo mode
+              userPhotos: isFromMultiPhoto ? currentCapturedPhotos : undefined, // Use all photos for multi-photo mode
+              userFeedback: feedback,
+              location: locationToUse || undefined, // Pass the location data, converting null to undefined
+              medicinalDetails: medicinalDetails || undefined, // Pass medicinal details if provided
             });
 
             console.log("✅ Plant confirmed and added:", result.scientificName);
@@ -698,6 +733,37 @@ Collected with AncesTree 🌿📱`;
         }
     };
 
+    // Add location to plant function
+    const handleAddLocationToPlant = async (plantId: string, location: LocationData) => {
+        try {
+            console.log('Adding location to plant:', plantId, location);
+            
+            // Call the Convex action to add location to plant
+            const result = await addLocationToPlant({
+                plantId: plantId as any,
+                latitude: location.latitude,
+                longitude: location.longitude,
+                address: location.address,
+                accuracy: location.accuracy,
+            });
+            
+            if (result.success) {
+                Alert.alert('Location Added', 'Location has been added to this plant sighting.');
+                // Force refresh the plant data to show the new location
+                const currentPlantId = selectedPlantId;
+                setSelectedPlantId(null);
+                setTimeout(() => {
+                    setSelectedPlantId(currentPlantId);
+                }, 200);
+            } else {
+                Alert.alert('Error', result.error || 'Failed to add location to plant.');
+            }
+        } catch (error) {
+            console.error('Failed to add location to plant:', error);
+            Alert.alert('Error', 'Failed to add location to plant.');
+        }
+    };
+
     // Add a function to refresh plant data
     const refreshPlantData = async () => {
         if (selectedPlantId && !loading) {
@@ -731,6 +797,11 @@ Collected with AncesTree 🌿📱`;
             }
         }
     };
+
+    // State for fullscreen map modal
+    const [showFullscreenMap, setShowFullscreenMap] = useState(false);
+    const [fullscreenSelectedLocation, setFullscreenSelectedLocation] = useState<any>(null);
+    const [fullscreenMapLocations, setFullscreenMapLocations] = useState<LocationData[]>([]);
 
     return (
         <View style={{ flex: 1, backgroundColor: '#f0fdf4' }}>
@@ -811,7 +882,7 @@ Collected with AncesTree 🌿📱`;
                     backgroundColor: '#f0fdf4', 
                     paddingHorizontal: 24, 
                     paddingTop: 140, // Increased to account for sticky header
-                    paddingBottom: 40, 
+                    paddingBottom: 80, // Increased to ensure last item is visible when scrolling
                     alignItems: 'center' 
                 }}
             >
@@ -871,6 +942,18 @@ Collected with AncesTree 🌿📱`;
                         setCurrentView={setCurrentView}
                         handleDeletePlant={handleDeletePlant}
                         getAllUniqueTags={getAllUniqueTags}
+                        refreshTrigger={collectionRefreshTrigger}
+                        // Remove modal state props from here
+                        // showFullscreenMap={showFullscreenMap}
+                        // setShowFullscreenMap={setShowFullscreenMap}
+                        // fullscreenSelectedLocation={fullscreenSelectedLocation}
+                        // setFullscreenSelectedLocation={setFullscreenSelectedLocation}
+                        // Instead, pass a handler to open the modal with a location
+                        onOpenFullscreenMap={(location, filteredLocations) => {
+                            setFullscreenSelectedLocation(location);
+                            setShowFullscreenMap(true);
+                            setFullscreenMapLocations(filteredLocations);
+                        }}
                     />
                 )}
 
@@ -911,6 +994,7 @@ Collected with AncesTree 🌿📱`;
                         updatePlantFeedback={editPlantFeedback}
                         addPlantFeedback={addPlantFeedback}
                         refreshPlantData={refreshPlantData}
+                        handleAddLocationToPlant={handleAddLocationToPlant}
                     />
                 )}
 
@@ -920,6 +1004,27 @@ Collected with AncesTree 🌿📱`;
                     imageUri={zoomedImage}
                     onClose={() => setZoomedImage(null)}
                 />
+                {/* Fullscreen Map Modal - now fully isolated at root */}
+                {showFullscreenMap && (
+                    <Modal
+                        visible={showFullscreenMap}
+                        animationType="slide"
+                        onRequestClose={() => setShowFullscreenMap(false)}
+                        transparent={false}
+                    >
+                        <FullscreenMapModal
+                            filteredLocations={fullscreenMapLocations}
+                            selectedLocation={fullscreenSelectedLocation}
+                            setSelectedLocation={setFullscreenSelectedLocation}
+                            onClose={() => setShowFullscreenMap(false)}
+                            onViewPlant={(plantId: string) => {
+                                setSelectedPlantId(plantId);
+                                setCurrentView('detail');
+                                setShowFullscreenMap(false);
+                            }}
+                        />
+                    </Modal>
+                )}
             </ScrollView>
         </View>
     );

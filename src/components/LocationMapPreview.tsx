@@ -132,7 +132,7 @@ export default function LocationMapPreview({
                             textShadowOffset: { width: 1, height: 1 },
                             textShadowRadius: 2
                         }}>
-                            Tap to Open in Maps
+                            Location Preview
                         </Text>
                         <Text style={{ 
                             color: 'rgba(255,255,255,0.9)', 
@@ -244,23 +244,6 @@ export default function LocationMapPreview({
                 )}
             </View>
 
-            {/* Action Button */}
-            <TouchableOpacity
-                style={{
-                    backgroundColor: '#059669',
-                    paddingVertical: 10,
-                    paddingHorizontal: 16,
-                    borderRadius: 8,
-                    alignItems: 'center',
-                    marginTop: 12
-                }}
-                onPress={() => openInMaps(location.latitude, location.longitude, plantName)}
-            >
-                <Text style={{ color: 'white', fontWeight: '600', fontSize: 13 }}>
-                    🗺️ Open in Maps App
-                </Text>
-            </TouchableOpacity>
-
             {/* Help text */}
             <Text style={{ 
                 fontSize: 10, 
@@ -269,7 +252,7 @@ export default function LocationMapPreview({
                 marginTop: 8,
                 lineHeight: 12
             }}>
-                💡 Tap coordinates to copy • Tap map or button to open in navigation app
+                💡 Tap coordinates to copy • Tap map to open in navigation
             </Text>
         </View>
     );

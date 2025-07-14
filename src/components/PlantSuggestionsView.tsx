@@ -3,6 +3,8 @@ import { View, Text, TouchableOpacity, Image, Alert, ScrollView, TextInput, Moda
 import { PinchGestureHandler, PanGestureHandler, State } from 'react-native-gesture-handler';
 import { LocationData } from '../hooks/useLocationHandler';
 import { useLocationHandler } from '../hooks/useLocationHandler';
+import PlantMedicinalDetailsModal from './PlantMedicinalDetailsModal';
+import PlantConfirmationModal from './PlantConfirmationModal';
 
 interface PlantSuggestion {
   plantId?: any;
@@ -18,7 +20,7 @@ interface PlantSuggestion {
 interface PlantSuggestionsViewProps {
   suggestions: PlantSuggestion[];
   userPhotoBase64: string;
-  onPlantSelected: (suggestion: PlantSuggestion, feedback?: string, location?: LocationData | null) => void;
+  onPlantSelected: (suggestion: PlantSuggestion, feedback?: string, location?: LocationData | null, medicinalDetails?: any) => void;
   onRequestBetterIdentification: (userDescription: string, rejectedSuggestions: string[]) => void;
   onBackToCamera: () => void;
   onRejectionFeedback: (rejectedPlantName: string, allSuggestions: PlantSuggestion[]) => void;
@@ -69,6 +71,14 @@ export default function PlantSuggestionsView({
   const [modalImages, setModalImages] = useState<string[]>([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [modalTitle, setModalTitle] = useState('');
+  
+  // Medicinal details modal state
+  const [showMedicinalDetailsModal, setShowMedicinalDetailsModal] = useState(false);
+  const [medicinalDetails, setMedicinalDetails] = useState<any>(null);
+
+  // Confirmation modal state
+  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
+  const [confirmationSuggestion, setConfirmationSuggestion] = useState<PlantSuggestion | null>(null);
 
   // Gesture animation values
   const scale = useRef(new Animated.Value(1)).current;
@@ -102,13 +112,26 @@ export default function PlantSuggestionsView({
     // Set loading immediately for user feedback
     setLocalLoading(true);
     
-    // Small delay to show the loading state, then open modal
+    // Small delay to show the loading state, then open confirmation modal
     setTimeout(() => {
-    setSelectedSuggestion(suggestion);
-    setShowFeedbackModal(true);
-    setUserFeedback('');
+      setConfirmationSuggestion(suggestion);
+      setShowConfirmationModal(true);
       setLocalLoading(false); // Reset after modal opens
     }, 100);
+  };
+
+  const handleConfirmPlant = (confirmedPlant: PlantSuggestion) => {
+    setSelectedSuggestion(confirmedPlant);
+    setShowFeedbackModal(true);
+    setUserFeedback('');
+    setShowConfirmationModal(false);
+    setConfirmationSuggestion(null);
+  };
+
+  const handleRequestBetterFromConfirmation = (userDescription: string, rejectedSuggestions: string[]) => {
+    onRequestBetterIdentification(userDescription, rejectedSuggestions);
+    setShowConfirmationModal(false);
+    setConfirmationSuggestion(null);
   };
 
   const confirmSelection = async (withFeedback: boolean = false) => {
@@ -124,10 +147,11 @@ export default function PlantSuggestionsView({
       console.log('  currentLocation from hook:', currentLocation);
       console.log('  selectedLocation from prop:', selectedLocation);
       
-      await onPlantSelected(selectedSuggestion, withFeedback ? userFeedback : undefined, locationToUse);
+      await onPlantSelected(selectedSuggestion, withFeedback ? userFeedback : undefined, locationToUse, medicinalDetails);
       setShowFeedbackModal(false);
       setUserFeedback('');
       setSelectedSuggestion(null);
+      setMedicinalDetails(null);
     } catch (error) {
       console.error('Error adding plant to collection:', error);
     } finally {
@@ -645,6 +669,30 @@ export default function PlantSuggestionsView({
                     </Text>
                   </TouchableOpacity>
                 </View>
+
+                {/* AI Confirmation Button */}
+                <TouchableOpacity
+                  style={{
+                    marginTop: 8,
+                    backgroundColor: '#0ea5e9',
+                    paddingVertical: 10,
+                    borderRadius: 8,
+                    alignItems: 'center',
+                    borderWidth: 1,
+                    borderColor: '#0284c7'
+                  }}
+                  onPress={() => {
+                    setConfirmationSuggestion(suggestion);
+                    setShowConfirmationModal(true);
+                  }}
+                >
+                  <Text style={{ color: 'white', fontWeight: '600', fontSize: 13 }}>
+                    🤖 Confirm with AI Questions
+                  </Text>
+                  <Text style={{ color: '#bae6fd', fontSize: 11, marginTop: 2 }}>
+                    Answer specific questions to verify this is the right plant
+                  </Text>
+                </TouchableOpacity>
               </Animated.View>
             );
           })
@@ -947,13 +995,34 @@ export default function PlantSuggestionsView({
                   padding: 12,
                   height: 80,
                   textAlignVertical: 'top',
-                  marginBottom: 20
+                  marginBottom: 16
                 }}
                 placeholder="e.g., 'Flowers were actually purple, not white' or 'Found in urban area'"
                 multiline
                 value={userFeedback}
                 onChangeText={setUserFeedback}
               />
+
+              {/* Medicinal Details Button */}
+              <TouchableOpacity
+                style={{
+                  backgroundColor: '#f0fdf4',
+                  borderWidth: 1,
+                  borderColor: '#bbf7d0',
+                  paddingVertical: 12,
+                  borderRadius: 8,
+                  alignItems: 'center',
+                  marginBottom: 20
+                }}
+                onPress={() => {
+                  setShowFeedbackModal(false);
+                  setShowMedicinalDetailsModal(true);
+                }}
+              >
+                <Text style={{ color: '#166534', fontWeight: '600' }}>
+                  🌿 Add Medicinal Details
+                </Text>
+              </TouchableOpacity>
 
               {/* Action Buttons */}
               <View style={{ flexDirection: 'row', gap: 12 }}>
@@ -1197,6 +1266,33 @@ export default function PlantSuggestionsView({
             </Text>
           </View>
         </View>
+      )}
+
+      {/* Medicinal Details Modal */}
+      <PlantMedicinalDetailsModal
+        visible={showMedicinalDetailsModal}
+        onClose={() => setShowMedicinalDetailsModal(false)}
+        onSave={(details) => {
+          setMedicinalDetails(details);
+          setShowMedicinalDetailsModal(false);
+          setShowFeedbackModal(true);
+        }}
+        plantName={selectedSuggestion?.commonNames[0] || selectedSuggestion?.scientificName || ''}
+      />
+
+      {/* AI Confirmation Modal */}
+      {confirmationSuggestion && (
+        <PlantConfirmationModal
+          visible={showConfirmationModal}
+          onClose={() => {
+            setShowConfirmationModal(false);
+            setConfirmationSuggestion(null);
+          }}
+          plantSuggestion={confirmationSuggestion}
+          userPhotoBase64={userPhotoBase64}
+          onConfirm={handleConfirmPlant}
+          onRequestBetterIdentification={handleRequestBetterFromConfirmation}
+        />
       )}
     </View>
   );
