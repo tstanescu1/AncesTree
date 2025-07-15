@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { View, Text, Image, Dimensions, Pressable, TouchableOpacity } from 'react-native';
 import MapView, { Marker, Callout, PROVIDER_GOOGLE, MapMarker } from 'react-native-maps';
 import { useLocationHandler } from '../hooks/useLocationHandler';
@@ -12,7 +12,8 @@ interface LocationItem {
   address?: string;
   locationTimestamp?: number;
   plantId?: string;
-  _justSelected?: boolean;
+  sightingCount?: number;
+  locationId?: string;
 }
 
 interface CollectionMapViewProps {
@@ -34,7 +35,8 @@ export default function CollectionMapView({
 }: CollectionMapViewProps) {
   const { openInMaps } = useLocationHandler();
   const mapRef = useRef<MapView>(null);
-  const markerRefs = useRef<Record<string, MapMarker | null>>({});
+  const markerRefs = useRef<(MapMarker | null)[]>([]);
+  const [lastPinClickTime, setLastPinClickTime] = useState(0);
 
   if (locations.length === 0) {
     return (
@@ -68,29 +70,54 @@ export default function CollectionMapView({
     }
   }, [locations.length]);
 
-  // Highlight pin when selectedLocation changes
+  // Show callout first, then zoom to selected location when it changes
   useEffect(() => {
     if (selectedLocation && mapRef.current) {
-      // Show callout without zooming if we're already close to the location
-      const key = `${selectedLocation.latitude}_${selectedLocation.longitude}`;
-      const marker = markerRefs.current[key];
-      marker?.showCallout();
+      // Find the index of the selected location in the locations array
+      // Consider both coordinates and plant ID for more accurate matching
+      const selectedIndex = locations.findIndex(loc => {
+        const coordMatch = loc.latitude === selectedLocation.latitude && 
+                          loc.longitude === selectedLocation.longitude;
+        const plantMatch = loc.plantId === selectedLocation.plantId;
+        
+        // If we have a plant ID, use it for more precise matching
+        if (selectedLocation.plantId && loc.plantId) {
+          return coordMatch && plantMatch;
+        }
+        
+        // Fallback to coordinate matching only
+        return coordMatch;
+      });
       
-      // Only zoom if this is a new selection (not just a callout click)
-      // We'll use a simple approach: only zoom on first selection or when coming from list
-      if (!selectedLocation._justSelected) {
-        mapRef.current.animateToRegion(
-          {
-            latitude: selectedLocation.latitude,
-            longitude: selectedLocation.longitude,
-            latitudeDelta: 0.1,
-            longitudeDelta: 0.1,
-          },
-          500
-        );
+      if (selectedIndex !== -1 && selectedIndex < markerRefs.current.length) {
+        const marker = markerRefs.current[selectedIndex];
+        
+        if (marker) {
+          // Show callout immediately
+          marker.showCallout();
+          
+          // Check if this selection came from a recent pin click
+          const now = Date.now();
+          const isFromPinClick = (now - lastPinClickTime) < 500; // Within 500ms of a pin click
+          
+          // Only zoom if this is NOT from a pin click (i.e., from list or external selection)
+          if (!isFromPinClick) {
+            setTimeout(() => {
+              mapRef.current?.animateToRegion(
+                {
+                  latitude: selectedLocation.latitude,
+                  longitude: selectedLocation.longitude,
+                  latitudeDelta: 0.012,
+                  longitudeDelta: 0.012,
+                },
+                500
+              );
+            }, 100);
+          }
+        }
       }
     }
-  }, [selectedLocation?.latitude, selectedLocation?.longitude]);
+  }, [selectedLocation?.latitude, selectedLocation?.longitude, selectedLocation?.plantId, locations, lastPinClickTime]);
 
   return (
     <View style={{ width: '100%', height, borderRadius, overflow: 'hidden' }}>
@@ -107,15 +134,23 @@ export default function CollectionMapView({
         }}
       >
         {locations.map((loc, idx) => {
-          const key = `${loc.latitude}_${loc.longitude}`;
           return (
           <Marker
-            key={idx}
+            key={loc.locationId || `${loc.plantId}_${loc.latitude}_${loc.longitude}_${idx}`}
             ref={(ref) => {
-              markerRefs.current[key] = ref;
+              markerRefs.current[idx] = ref;
             }}
             coordinate={{ latitude: loc.latitude, longitude: loc.longitude }}
             pinColor="#059669"
+            onPress={() => {
+              // Record the pin click time
+              setLastPinClickTime(Date.now());
+              
+              // When pin is pressed, select the location
+              if (onSelectLocation) {
+                onSelectLocation(loc);
+              }
+            }}
           >
             <Callout
               tooltip={false}
@@ -123,20 +158,41 @@ export default function CollectionMapView({
                 if (onImagePress) {
                   onImagePress(loc);
                 } else if (onSelectLocation) {
-                  // Mark this as a callout click to prevent zooming
-                  onSelectLocation({ ...loc, _justSelected: true });
+                  onSelectLocation(loc);
                 } else {
                   openInMaps(loc.latitude, loc.longitude, loc.plantName);
                 }
               }}
             >
               <View style={{ padding: 6, maxWidth: 220 }}>
-                <Text style={{ fontWeight: '600', marginBottom: 4 }}>{loc.plantName}</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <Text style={{ fontWeight: '600' }}>{loc.plantName}</Text>
+                  {loc.sightingCount && loc.sightingCount > 1 && (
+                    <View style={{ 
+                      backgroundColor: '#f59e0b', 
+                      paddingHorizontal: 6, 
+                      paddingVertical: 2, 
+                      borderRadius: 10 
+                    }}>
+                      <Text style={{ color: 'white', fontSize: 10, fontWeight: '600' }}>
+                        {loc.sightingCount}×
+                      </Text>
+                    </View>
+                  )}
+                </View>
                 {loc.plantImage && (
                   <Image
                     source={{ 
-                      uri: loc.plantImage.startsWith('data:') ? loc.plantImage : 
-                             loc.plantImage ? `data:image/jpeg;base64,${loc.plantImage}` : loc.plantImage
+                      uri: (() => {
+                        const photoUri = loc.plantImage;
+                        if (!photoUri) return '';
+                        // If it's already a data URL or http URL, use as is
+                        if (photoUri.startsWith('data:') || photoUri.startsWith('http')) {
+                          return photoUri;
+                        }
+                        // Otherwise, treat as base64 and add data URL prefix
+                        return `data:image/jpeg;base64,${photoUri}`;
+                      })()
                     }}
                     style={{ width: 200, height: 120, borderRadius: 6, marginBottom: 4 }}
                     resizeMode="cover"

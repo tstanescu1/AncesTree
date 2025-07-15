@@ -881,7 +881,7 @@ Collected with AncesTree 🌿📱`;
                     flexGrow: 1, 
                     backgroundColor: '#f0fdf4', 
                     paddingHorizontal: 24, 
-                    paddingTop: 140, // Increased to account for sticky header
+                    paddingTop: 130, // Increased to account for sticky header
                     paddingBottom: 80, // Increased to ensure last item is visible when scrolling
                     alignItems: 'center' 
                 }}

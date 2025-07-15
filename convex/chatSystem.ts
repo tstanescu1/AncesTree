@@ -12,20 +12,22 @@ const generateMessageId = (): string => {
 export const getChatMessages = query({
   args: { 
     plantId: v.id("plants"),
+    chatType: v.optional(v.string()),
     sightingId: v.optional(v.id("sightings"))
   },
-  handler: async (ctx, { plantId, sightingId }) => {
-    const messages = await ctx.db
+  handler: async (ctx, { plantId, chatType, sightingId }) => {
+    let messages = await ctx.db
       .query("chat_messages")
       .withIndex("plantId", (q) => q.eq("plantId", plantId))
       .order("asc")
       .collect();
 
-    // If sightingId is provided, filter messages for that specific sighting
-    if (sightingId) {
-      return messages.filter(msg => msg.sightingId === sightingId);
+    if (chatType) {
+      messages = messages.filter(msg => msg.chatType === chatType);
     }
-
+    if (sightingId) {
+      messages = messages.filter(msg => msg.sightingId === sightingId);
+    }
     return messages;
   },
 });
@@ -37,8 +39,9 @@ export const sendMessage = action({
     sightingId: v.optional(v.id("sightings")),
     content: v.string(),
     messageId: v.string(),
+    chatType: v.optional(v.string()),
   },
-  handler: async (ctx, { plantId, sightingId, content, messageId }) => {
+  handler: async (ctx, { plantId, sightingId, content, messageId, chatType }) => {
     console.log("🚀 SEND MESSAGE FUNCTION CALLED - NEW VERSION");
     
     // Store user message
@@ -47,6 +50,7 @@ export const sendMessage = action({
       sightingId,
       content,
       messageId,
+      chatType,
     });
 
     // Get comprehensive context including all user data
@@ -56,7 +60,7 @@ export const sendMessage = action({
     const plantFeedback = await ctx.runQuery(internal.chatSystem.getPlantFeedback, { plantId });
     const plantRejections = await ctx.runQuery(internal.chatSystem.getPlantRejections, { plantId });
     const collectionStats = await ctx.runQuery(internal.chatSystem.getCollectionStats, {});
-    const chatHistory = await ctx.runQuery(internal.chatSystem.getChatHistory, { plantId, sightingId });
+    const chatHistory = await ctx.runQuery(internal.chatSystem.getChatHistory, { plantId, sightingId, chatType });
 
     // Log the data retrieved from database
     console.log("=== DATABASE QUERY RESULTS ===");
@@ -84,6 +88,7 @@ export const sendMessage = action({
       plantId,
       sightingId,
       messageId,
+      chatType,
       ctx
     );
 
@@ -97,8 +102,9 @@ export const editMessage = action({
     plantId: v.id("plants"),
     messageId: v.string(),
     newContent: v.string(),
+    chatType: v.optional(v.string()),
   },
-  handler: async (ctx, { plantId, messageId, newContent }) => {
+  handler: async (ctx, { plantId, messageId, newContent, chatType }) => {
     console.log("🔧 EDIT MESSAGE FUNCTION CALLED - NEW VERSION");
     console.log("🚨 THIS IS THE NEW VERSION - IF YOU SEE THIS, THE DEPLOYMENT WORKED!");
     
@@ -109,7 +115,7 @@ export const editMessage = action({
     });
 
     // Get all messages up to this point
-    const messages = await ctx.runQuery(internal.chatSystem.getChatMessagesInternal, { plantId });
+    const messages = await ctx.runQuery(internal.chatSystem.getChatMessagesInternal, { plantId, chatType });
     const messageIndex = messages.findIndex((msg: any) => msg.messageId === messageId);
     
     if (messageIndex === -1) {
@@ -158,6 +164,7 @@ export const editMessage = action({
         plantId,
         message.sightingId,
         messageId,
+        chatType,
         ctx
       );
 
@@ -173,10 +180,11 @@ export const deleteMessage = action({
   args: {
     plantId: v.id("plants"),
     messageId: v.string(),
+    chatType: v.optional(v.string()),
   },
-  handler: async (ctx, { plantId, messageId }) => {
+  handler: async (ctx, { plantId, messageId, chatType }) => {
     // Get all messages
-    const messages = await ctx.runQuery(internal.chatSystem.getChatMessagesInternal, { plantId });
+    const messages = await ctx.runQuery(internal.chatSystem.getChatMessagesInternal, { plantId, chatType });
     const messageIndex = messages.findIndex((msg: any) => msg.messageId === messageId);
     
     if (messageIndex === -1) {
@@ -200,8 +208,9 @@ export const storeUserMessage = internalMutation({
     sightingId: v.optional(v.id("sightings")),
     content: v.string(),
     messageId: v.string(),
+    chatType: v.optional(v.string()),
   },
-  handler: async (ctx, { plantId, sightingId, content, messageId }) => {
+  handler: async (ctx, { plantId, sightingId, content, messageId, chatType }) => {
     await ctx.db.insert("chat_messages", {
       plantId,
       sightingId,
@@ -209,6 +218,7 @@ export const storeUserMessage = internalMutation({
       content,
       timestamp: Date.now(),
       messageId,
+      chatType,
     });
   },
 });
@@ -220,8 +230,9 @@ export const storeAIMessage = internalMutation({
     content: v.string(),
     messageId: v.string(),
     parentMessageId: v.optional(v.string()),
+    chatType: v.optional(v.string()),
   },
-  handler: async (ctx, { plantId, sightingId, content, messageId, parentMessageId }) => {
+  handler: async (ctx, { plantId, sightingId, content, messageId, parentMessageId, chatType }) => {
     await ctx.db.insert("chat_messages", {
       plantId,
       sightingId,
@@ -230,6 +241,7 @@ export const storeAIMessage = internalMutation({
       timestamp: Date.now(),
       messageId,
       parentMessageId,
+      chatType,
     });
   },
 });
@@ -321,14 +333,6 @@ export const cleanupChatMessages = internalMutation({
   },
 });
 
-// Public action to run cleanup
-export const runCleanup = action({
-  args: {},
-  handler: async (ctx): Promise<{ deleted: number }> => {
-    return await ctx.runMutation(internal.chatSystem.cleanupChatMessages, {});
-  },
-});
-
 // Internal queries for context
 export const getPlantContext = internalQuery({
   args: { plantId: v.id("plants") },
@@ -417,41 +421,51 @@ export const getCollectionStats = internalQuery({
 export const getChatHistory = internalQuery({
   args: { 
     plantId: v.id("plants"),
-    sightingId: v.optional(v.id("sightings"))
+    sightingId: v.optional(v.id("sightings")),
+    chatType: v.optional(v.string())
   },
-  handler: async (ctx, { plantId, sightingId }) => {
+  handler: async (ctx, { plantId, sightingId, chatType }) => {
     const messages = await ctx.db
       .query("chat_messages")
       .withIndex("plantId", (q) => q.eq("plantId", plantId))
       .order("asc")
       .collect();
 
+    let filteredMessages = messages;
     if (sightingId) {
-      return messages.filter(msg => msg.sightingId === sightingId);
+      filteredMessages = filteredMessages.filter(msg => msg.sightingId === sightingId);
+    }
+    if (chatType) {
+      filteredMessages = filteredMessages.filter(msg => msg.chatType === chatType);
     }
 
-    return messages;
+    return filteredMessages;
   },
 });
 
 export const getChatMessagesInternal = internalQuery({
   args: { 
     plantId: v.id("plants"),
-    sightingId: v.optional(v.id("sightings"))
+    sightingId: v.optional(v.id("sightings")),
+    chatType: v.optional(v.string())
   },
-  handler: async (ctx, { plantId, sightingId }) => {
+  handler: async (ctx, { plantId, sightingId, chatType }) => {
     const messages = await ctx.db
       .query("chat_messages")
       .withIndex("plantId", (q) => q.eq("plantId", plantId))
       .order("asc")
       .collect();
 
+    let filteredMessages = messages;
     // If sightingId is provided, filter messages for that specific sighting
     if (sightingId) {
-      return messages.filter(msg => msg.sightingId === sightingId);
+      filteredMessages = filteredMessages.filter(msg => msg.sightingId === sightingId);
+    }
+    if (chatType) {
+      filteredMessages = filteredMessages.filter(msg => msg.chatType === chatType);
     }
 
-    return messages;
+    return filteredMessages;
   },
 });
 
@@ -513,6 +527,7 @@ async function generateStreamingAIResponse(
   plantId: string,
   sightingId: string | undefined,
   parentMessageId: string,
+  chatType: string | undefined,
   ctx: any
 ): Promise<string> {
   // Build context for the AI with comprehensive data
@@ -546,6 +561,7 @@ async function generateStreamingAIResponse(
       content: "Taita is thinking...",
       messageId: aiMessageId,
       parentMessageId,
+      chatType,
     });
 
     // Call OpenAI API with streaming

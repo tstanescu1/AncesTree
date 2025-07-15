@@ -34,9 +34,7 @@ export default function PlantCollectionView({
     const [tagCleanupLoading, setTagCleanupLoading] = useState(false);
     const [showMap, setShowMap] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
-    const [selectedLocation, setSelectedLocation] = useState<any>(null);
-    const [showSightingModal, setShowSightingModal] = useState(false);
-    const [selectedSighting, setSelectedSighting] = useState<any>(null);
+    // Remove selectedLocation, showSightingModal, selectedSighting, and all map preview state
 
     // Get standardized tags from backend
     const standardTags = useQuery(api.identifyPlant.getStandardMedicinalTags) || [];
@@ -49,10 +47,23 @@ export default function PlantCollectionView({
     const mapWidth = Math.min(screenWidth - 32, 400);
     const mapHeight = Math.round(mapWidth * 0.6);
 
-    // Get all locations from filtered plants
+    // Helper function to calculate distance between two coordinates
+    const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+        const R = 6371; // Earth's radius in kilometers
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLng = (lng2 - lng1) * Math.PI / 180;
+        const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng/2) * Math.sin(dLng/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+    };
+
+    // Remove getAllFilteredLocations, filteredLocations, and all map preview logic
+    // Instead, compute filteredLocations only for fullscreen map
     const getAllFilteredLocations = () => {
         if (!plants) return [];
-        
         const filteredPlants = (selectedTags.length > 0 
             ? plants.filter(plant => selectedTags.every(tag => plant.medicinalTags.includes(tag)))
             : plants).filter(plant => {
@@ -62,29 +73,65 @@ export default function PlantCollectionView({
                 const tagMatch = (plant.medicinalTags?.join(' ') || '').toLowerCase().includes(q);
                 return nameMatch || tagMatch;
             });
-        
         const allLocations: any[] = [];
-        
         filteredPlants.forEach(plant => {
             if (plant.allSightings) {
+                const locationGroups: any[] = [];
                 plant.allSightings.forEach((sighting: any) => {
                     if (sighting.latitude && sighting.longitude) {
-                        allLocations.push({
-                            ...sighting,
-                            plantName: plant.commonNames?.[0] || plant.scientificName,
-                            plantScientificName: plant.scientificName,
-                            plantId: plant._id,
-                            plantImage: sighting.photoUri || plant.latestUserPhoto || plant.imageUrl,
-                            medicinalTags: plant.medicinalTags || []
-                        });
+                        let addedToGroup = false;
+                        for (const group of locationGroups) {
+                            const distance = calculateDistance(
+                                group.latitude,
+                                group.longitude,
+                                sighting.latitude,
+                                sighting.longitude
+                            );
+                            if (distance < 0.1) {
+                                group.sightingCount++;
+                                if (sighting.identifiedAt > group.identifiedAt) {
+                                    group.latitude = sighting.latitude;
+                                    group.longitude = sighting.longitude;
+                                    group.address = sighting.address;
+                                    group.identifiedAt = sighting.identifiedAt;
+                                }
+                                if (!group.allSightingsInGroup) {
+                                    group.allSightingsInGroup = [group];
+                                }
+                                group.allSightingsInGroup.push(sighting);
+                                group.locationId = `${plant._id}_${group.latitude.toFixed(6)}_${group.longitude.toFixed(6)}`;
+                                addedToGroup = true;
+                                break;
+                            }
+                        }
+                        if (!addedToGroup) {
+                            const locationData = {
+                                ...sighting,
+                                plantName: plant.commonNames?.[0] || plant.scientificName,
+                                plantScientificName: plant.scientificName,
+                                plantId: plant._id,
+                                plantImage: (() => {
+                                    const photoUri = plant.latestUserPhoto;
+                                    if (!photoUri) return sighting.photoUri;
+                                    if (photoUri.startsWith('data:') || photoUri.startsWith('http')) {
+                                        return photoUri;
+                                    }
+                                    return `data:image/jpeg;base64,${photoUri}`;
+                                })(),
+                                medicinalTags: plant.medicinalTags || [],
+                                sightingCount: 1,
+                                allSightingsInGroup: [sighting],
+                                locationId: `${plant._id}_${sighting.latitude.toFixed(6)}_${sighting.longitude.toFixed(6)}`
+                            };
+                            locationGroups.push(locationData);
+                        }
                     }
                 });
+                allLocations.push(...locationGroups);
             }
         });
-        
         return allLocations;
     };
-
     const filteredLocations = getAllFilteredLocations();
 
     const handleStandardizeExistingTags = async () => {
@@ -116,11 +163,7 @@ export default function PlantCollectionView({
         );
     };
 
-    const handleNavigateToSighting = (location: any) => {
-        setSelectedPlantId(location.plantId);
-        setCurrentView('detail');
-        onOpenFullscreenMap(location, filteredLocations);
-    };
+    // Remove handleNavigateToSighting and any other function or prop related to selectedLocation, setSelectedLocation, setSelectedSighting, setShowSightingModal
 
     // removed old InteractiveMapPreview component
 
@@ -129,7 +172,7 @@ export default function PlantCollectionView({
     // Only use onOpenFullscreenMap for fullscreen map actions
 
     return (
-        <View style={{ padding: 16, alignSelf: 'flex-start', width: '100%' }}>
+        <View style={{ padding: 1, alignSelf: 'flex-start', width: '100%', paddingTop: 16 }}>
             {/* Header with admin functions */}
             {plants && (
             <View style={{ 
@@ -143,7 +186,7 @@ export default function PlantCollectionView({
                 <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#15803d', textAlign: 'center', marginBottom: 8 }}>
                     🌿 Plant Collection
                 </Text>
-                <Text style={{ fontSize: 14, color: '#166534', textAlign: 'center', marginBottom: 12 }}>
+                <Text style={{ fontSize: 14, color: '#166534', textAlign: 'center', marginBottom: 2 }}>
                     {plants?.length || 0} species • {plants?.reduce((sum, p) => sum + (p.sightingsCount || 1), 0) || 0} total sightings
                 </Text>
 
@@ -298,6 +341,7 @@ export default function PlantCollectionView({
             )}
 
             {/* Collection Map - Show filtered sightings */}
+            {/* Remove the small interactive map preview and quick access list. Replace with a single button to open the fullscreen map. */}
             {filteredLocations.length > 0 && (
                 <View style={{ 
                     marginBottom: 16, 
@@ -311,127 +355,35 @@ export default function PlantCollectionView({
                     borderWidth: 1,
                     borderColor: '#e5e7eb'
                 }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 1 }}>
                         <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534' }}>
-                            🗺️ Filtered Map
+                            🗺️ Interactive Map
                         </Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                             <Text style={{ fontSize: 12, color: '#6b7280' }}>
                                 {filteredLocations.length} location{filteredLocations.length !== 1 ? 's' : ''}
                             </Text>
                             <TouchableOpacity
-                                onPress={() => setShowMap(!showMap)}
+                                onPress={() => onOpenFullscreenMap(null, filteredLocations)}
                                 style={{
-                                    backgroundColor: showMap ? '#059669' : '#f3f4f6',
+                                    backgroundColor: '#059669',
                                     paddingHorizontal: 8,
                                     paddingVertical: 4,
                                     borderRadius: 6,
                                     borderWidth: 1,
-                                    borderColor: showMap ? '#059669' : '#e5e7eb'
+                                    borderColor: '#059669'
                                 }}
                             >
                                 <Text style={{ 
                                     fontSize: 11, 
-                                    color: showMap ? 'white' : '#6b7280',
+                                    color: 'white',
                                     fontWeight: '600'
                                 }}>
-                                    {showMap ? 'Hide' : 'Show'} Map
+                                    Show Map
                                 </Text>
                             </TouchableOpacity>
                         </View>
                     </View>
-
-                    {showMap && (
-                        <View>
-                            {/* Interactive Map Preview */}
-                            <View style={{ position: 'relative' }}>
-                                <CollectionMapView 
-                                    locations={filteredLocations} 
-                                    height={mapHeight} 
-                                    selectedLocation={selectedLocation}
-                                    onSelectLocation={(location) => {
-                                        // Focus the pin by updating local state
-                                        // Remove the _justSelected flag to allow zooming when selecting from list
-                                        const { _justSelected, ...locationWithoutFlag } = location;
-                                        setSelectedLocation(locationWithoutFlag);
-                                    }}
-                                    onImagePress={(location) => {
-                                        setSelectedSighting(location);
-                                        setShowSightingModal(true);
-                                    }}
-                                />
-                                {/* Fullscreen button */}
-                                <TouchableOpacity
-                                    onPress={() => onOpenFullscreenMap(null, filteredLocations)}
-                                    style={{
-                                        position: 'absolute',
-                                        top: 8,
-                                        right: 8,
-                                        backgroundColor: 'rgba(0,0,0,0.6)',
-                                        paddingHorizontal: 8,
-                                        paddingVertical: 4,
-                                        borderRadius: 6,
-                                    }}
-                                >
-                                    <Text style={{ color: 'white', fontSize: 11, fontWeight: '600' }}>⤢ Fullscreen</Text>
-                                </TouchableOpacity>
-                            </View>
-
-                            {/* Quick Location List */}
-                            <View style={{ marginTop: 12 }}>
-                                <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534', marginBottom: 8 }}>
-                                    📍 Quick Access:
-                                </Text>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                                        {filteredLocations.slice(0, 5).map((location, index) => (
-                                            <TouchableOpacity
-                                                key={index}
-                                                style={{
-                                                    backgroundColor: '#f0fdf4',
-                                                    padding: 8,
-                                                    borderRadius: 6,
-                                                    borderWidth: 1,
-                                                    borderColor: '#bbf7d0',
-                                                    minWidth: 120
-                                                }}
-                                                onPress={() => {
-                                                    if (!showMap) setShowMap(true);
-                                                    setSelectedLocation(location);
-                                                }}
-                                            >
-                                                <Text style={{ fontSize: 10, fontWeight: '600', color: '#374151', marginBottom: 2 }}>
-                                                    🌿 {location.plantName}
-                                                </Text>
-                                                <Text style={{ fontSize: 9, color: '#6b7280', fontFamily: 'monospace' }}>
-                                                    {formatDecimalCoordinates(location.latitude, location.longitude)}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                        {filteredLocations.length > 5 && (
-                                            <TouchableOpacity
-                                                style={{
-                                                    backgroundColor: '#f8fafc',
-                                                    padding: 8,
-                                                    borderRadius: 6,
-                                                    borderWidth: 1,
-                                                    borderColor: '#e2e8f0',
-                                                    justifyContent: 'center',
-                                                    alignItems: 'center',
-                                                    minWidth: 80
-                                                }}
-                                                onPress={() => onOpenFullscreenMap(null, filteredLocations)}
-                                            >
-                                                <Text style={{ fontSize: 10, color: '#059669', fontWeight: '600' }}>
-                                                    +{filteredLocations.length - 5} more
-                                                </Text>
-                                            </TouchableOpacity>
-                                        )}
-                                    </View>
-                                </ScrollView>
-                            </View>
-                        </View>
-                    )}
                 </View>
             )}
 
@@ -484,17 +436,23 @@ export default function PlantCollectionView({
                                 onPress={() => {
                                     setSelectedPlantId(plantItem._id);
                                     setCurrentView('detail');
+                                    
                                 }}
                             >
-                                {/* Show compressed user photo first, fallback to reference image */}
-                                {(plantItem.latestUserPhoto || plantItem.imageUrl) && (
+                                {/* Show the default/primary image for this plant */}
+                                {plantItem.latestUserPhoto && (
                                     <View style={{ position: 'relative' }}>
                                         <Image 
                                             source={{ 
                                                 uri: (() => {
-                                                    const photoUri = plantItem.latestUserPhoto || plantItem.imageUrl;
-                                                    return photoUri && photoUri.startsWith('data:') ? photoUri : 
-                                                           photoUri ? `data:image/jpeg;base64,${photoUri}` : photoUri;
+                                                    const photoUri = plantItem.latestUserPhoto;
+                                                    if (!photoUri) return '';
+                                                    // If it's already a data URL or http URL, use as is
+                                                    if (photoUri.startsWith('data:') || photoUri.startsWith('http')) {
+                                                        return photoUri;
+                                                    }
+                                                    // Otherwise, treat as base64 and add data URL prefix
+                                                    return `data:image/jpeg;base64,${photoUri}`;
                                                 })()
                                             }} 
                                             style={{ 
@@ -515,13 +473,22 @@ export default function PlantCollectionView({
                                             position: 'absolute', 
                                             top: 8, 
                                             right: 8, 
-                                            backgroundColor: plantItem.latestUserPhoto ? '#059669' : '#6b7280',
+                                            backgroundColor: (() => {
+                                                const photoUri = plantItem.latestUserPhoto;
+                                                if (!photoUri) return '#6b7280';
+                                                // User photos start with 'data:image', reference images are http URLs
+                                                return photoUri.startsWith('data:') ? '#059669' : '#6b7280';
+                                            })(),
                                             paddingHorizontal: 6,
                                             paddingVertical: 2,
                                             borderRadius: 4
                                         }}>
                                             <Text style={{ color: 'white', fontSize: 10, fontWeight: '600' }}>
-                                                {plantItem.latestUserPhoto ? '📸 Your Photo' : '📚 Reference'}
+                                                {(() => {
+                                                    const photoUri = plantItem.latestUserPhoto;
+                                                    if (!photoUri) return '📚 Reference';
+                                                    return photoUri.startsWith('data:') ? '📸 Your Photo' : '📚 Reference';
+                                                })()}
                                             </Text>
                                         </View>
                                         {/* Sightings count badge */}
@@ -792,18 +759,7 @@ export default function PlantCollectionView({
 
             {/* Modals */}
             {/* Removed LocationDetailModal and showLocationModal */}
-            <SightingDetailModal
-                visible={showSightingModal}
-                location={selectedSighting}
-                onClose={() => {
-                    setShowSightingModal(false);
-                    setSelectedSighting(null);
-                }}
-                onViewPlant={(plantId) => {
-                    setSelectedPlantId(plantId);
-                    setCurrentView('detail');
-                }}
-            />
+            {/* Remove SightingDetailModal and all related state/logic */}
         </View>
     );
 } 

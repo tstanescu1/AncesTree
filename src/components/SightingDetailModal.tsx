@@ -17,6 +17,20 @@ export default function SightingDetailModal({
 }: SightingDetailModalProps) {
   const { openInMaps, formatDecimalCoordinates } = useLocationHandler();
 
+  // Debug logging
+  React.useEffect(() => {
+    if (visible && location) {
+      console.log('📋 Modal opened with:', {
+        plantName: location.plantName,
+        plantId: location.plantId,
+        locationId: location.locationId,
+        sightingCount: location.sightingCount,
+        coordinates: `${location.latitude}, ${location.longitude}`,
+        hasAllSightings: !!location.allSightingsInGroup
+      });
+    }
+  }, [visible, location]);
+
   if (!location) return null;
 
   return (
@@ -43,7 +57,7 @@ export default function SightingDetailModal({
         }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#166534' }}>
-              🌿 Plant Sighting
+              🌿 Plant Sighting{location.sightingCount && location.sightingCount > 1 ? ` (${location.sightingCount}×)` : ''}
             </Text>
             <TouchableOpacity
               onPress={onClose}
@@ -160,8 +174,34 @@ export default function SightingDetailModal({
               </Pressable>
             </View>
 
-            {/* Timestamp */}
-            {location.locationTimestamp && (
+            {/* Sighting Count and Timestamps */}
+            {location.sightingCount && location.sightingCount > 1 && (
+              <View style={{ marginBottom: 16 }}>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534', marginBottom: 6 }}>
+                  📸 Multiple Sightings ({location.sightingCount} total):
+                </Text>
+                {location.allSightingsInGroup && (
+                  <View style={{ backgroundColor: '#f8fafc', padding: 8, borderRadius: 6 }}>
+                    {location.allSightingsInGroup.slice(0, 3).map((sighting: any, index: number) => (
+                      <View key={index} style={{ marginBottom: index < 2 ? 4 : 0 }}>
+                        <Text style={{ fontSize: 11, color: '#6b7280' }}>
+                          • {new Date(sighting.identifiedAt || sighting.locationTimestamp).toLocaleDateString()}
+                          {sighting === location && ' (Most Recent)'}
+                        </Text>
+                      </View>
+                    ))}
+                    {location.allSightingsInGroup.length > 3 && (
+                      <Text style={{ fontSize: 11, color: '#9ca3af', fontStyle: 'italic' }}>
+                        ... and {location.allSightingsInGroup.length - 3} more
+                      </Text>
+                    )}
+                  </View>
+                )}
+              </View>
+            )}
+            
+            {/* Single Sighting Timestamp */}
+            {(!location.sightingCount || location.sightingCount === 1) && location.locationTimestamp && (
               <View style={{ marginBottom: 16 }}>
                 <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534', marginBottom: 4 }}>
                   🕐 Recorded:

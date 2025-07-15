@@ -791,7 +791,16 @@ export default function PlantIdentificationView({
                                 >
                                     {recentPlant.latestUserPhoto && (
                                         <Image 
-                                            source={{ uri: recentPlant.latestUserPhoto.startsWith('data:') ? recentPlant.latestUserPhoto : `data:image/jpeg;base64,${recentPlant.latestUserPhoto}` }} 
+                                            source={{ uri: (() => {
+                                                const photoUri = recentPlant.latestUserPhoto;
+                                                if (!photoUri) return '';
+                                                // If it's already a data URL or http URL, use as is
+                                                if (photoUri.startsWith('data:') || photoUri.startsWith('http')) {
+                                                    return photoUri;
+                                                }
+                                                // Otherwise, treat as base64 and add data URL prefix
+                                                return `data:image/jpeg;base64,${photoUri}`;
+                                            })() }} 
                                             style={{ 
                                                 width: 40, 
                                                 height: 40, 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Image, ScrollView, Modal, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, Image, Modal, Dimensions, PanGestureHandler, State } from 'react-native';
+import { PanGestureHandler as RNGHPanGestureHandler, PinchGestureHandler } from 'react-native-gesture-handler';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -10,39 +11,68 @@ interface ZoomModalProps {
 }
 
 export default function ZoomModal({ visible, imageUri, onClose }: ZoomModalProps) {
-    const [zoomScale, setZoomScale] = useState(1);
+    const [scale, setScale] = useState(1);
+    const [translateX, setTranslateX] = useState(0);
+    const [translateY, setTranslateY] = useState(0);
 
-    // Reset zoom when modal opens or image changes
+    // Reset all transforms when modal opens or image changes
     useEffect(() => {
-        if (visible) {
-            setZoomScale(1);
+        if (visible && imageUri) {
+            setScale(1);
+            setTranslateX(0);
+            setTranslateY(0);
         }
     }, [visible, imageUri]);
 
     const handleClose = () => {
-        setZoomScale(1);
+        setScale(1);
+        setTranslateX(0);
+        setTranslateY(0);
         onClose();
     };
+
+    const onPinchGestureEvent = (event: any) => {
+        const newScale = Math.max(1, Math.min(5, event.nativeEvent.scale));
+        setScale(newScale);
+    };
+
+    const onPanGestureEvent = (event: any) => {
+        if (scale > 1) {
+            setTranslateX(event.nativeEvent.translationX);
+            setTranslateY(event.nativeEvent.translationY);
+        }
+    };
+
+    if (!visible || !imageUri) {
+        return null;
+    }
 
     return (
         <Modal visible={visible} transparent animationType="fade">
             <View style={{ 
                 flex: 1, 
-                backgroundColor: 'rgba(0,0,0,0.95)' 
+                backgroundColor: 'rgba(0,0,0,0.95)',
+                justifyContent: 'center',
+                alignItems: 'center'
             }}>
                 {/* Header with close button */}
                 <View style={{ 
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
                     flexDirection: 'row', 
                     justifyContent: 'space-between', 
                     alignItems: 'center',
                     paddingTop: 50, 
                     paddingHorizontal: 20,
                     paddingBottom: 10,
-                    backgroundColor: 'rgba(0,0,0,0.8)'
+                    backgroundColor: 'rgba(0,0,0,0.8)',
+                    zIndex: 1000
                 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
-                            🔍 Zoom: {zoomScale.toFixed(1)}x
+                            🔍 Zoom: {scale.toFixed(1)}x
                         </Text>
                     </View>
                     <TouchableOpacity 
@@ -60,34 +90,15 @@ export default function ZoomModal({ visible, imageUri, onClose }: ZoomModalProps
                     </TouchableOpacity>
                 </View>
                 
-                {/* Zoomable ScrollView */}
-                {imageUri && (
-                    <ScrollView
-                        key={imageUri}
-                        style={{ flex: 1 }}
-                        contentContainerStyle={{ 
-                            flexGrow: 1, 
-                            justifyContent: 'center', 
-                            alignItems: 'center',
-                            minHeight: screenHeight - 120,
-                            backgroundColor: 'rgba(0,0,0,0.5)'
-                        }}
-                        showsHorizontalScrollIndicator={false}
-                        showsVerticalScrollIndicator={false}
-                        maximumZoomScale={5}
-                        minimumZoomScale={1}
-                        bouncesZoom={true}
-                        pinchGestureEnabled={true}
-                        scrollEventThrottle={16}
-                        onScroll={(event) => {
-                            const { zoomScale } = event.nativeEvent;
-                            setZoomScale(zoomScale);
-                        }}
-                        centerContent={true}
-                        scrollEnabled={true}
-                        directionalLockEnabled={false}
-                    >
+                {/* Image with custom zoom */}
+                <PinchGestureHandler onGestureEvent={onPinchGestureEvent}>
+                    <RNGHPanGestureHandler onGestureEvent={onPanGestureEvent}>
                         <View style={{
+                            transform: [
+                                { scale },
+                                { translateX },
+                                { translateY }
+                            ],
                             shadowColor: "#000",
                             shadowOffset: {
                                 width: 0,
@@ -98,7 +109,11 @@ export default function ZoomModal({ visible, imageUri, onClose }: ZoomModalProps
                             elevation: 10,
                         }}>
                             <Image 
-                                source={{ uri: imageUri.startsWith('data:') ? imageUri : `data:image/jpeg;base64,${imageUri}` }} 
+                                source={{ 
+                                    uri: imageUri.startsWith('data:') || imageUri.startsWith('http') 
+                                        ? imageUri 
+                                        : `data:image/jpeg;base64,${imageUri}` 
+                                }} 
                                 style={{ 
                                     width: screenWidth * 0.9, 
                                     height: screenHeight * 0.6,
@@ -108,15 +123,20 @@ export default function ZoomModal({ visible, imageUri, onClose }: ZoomModalProps
                                 }} 
                             />
                         </View>
-                    </ScrollView>
-                )}
+                    </RNGHPanGestureHandler>
+                </PinchGestureHandler>
                 
-                {/* Simplified Footer */}
+                {/* Footer */}
                 <View style={{ 
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
                     paddingHorizontal: 20, 
                     paddingVertical: 15,
                     backgroundColor: 'rgba(0,0,0,0.8)',
-                    alignItems: 'center'
+                    alignItems: 'center',
+                    zIndex: 1000
                 }}>
                     <Text style={{ 
                         color: 'white', 
@@ -124,14 +144,7 @@ export default function ZoomModal({ visible, imageUri, onClose }: ZoomModalProps
                         textAlign: 'center',
                         marginBottom: 4
                     }}>
-                        📱 Pinch to zoom • Drag to pan • Double-tap to zoom in
-                    </Text>
-                    <Text style={{ 
-                        color: '#9ca3af', 
-                        fontSize: 12,
-                        textAlign: 'center'
-                    }}>
-                        🖱️ Trackpad: Two-finger pinch/zoom • Works perfectly!
+                        📱 Pinch to zoom • Drag to pan
                     </Text>
                 </View>
             </View>

@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { api } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
+import OpenAI from "openai";
 
 /**
  * identifyPlant
@@ -1256,15 +1257,19 @@ export const getAllPlants = query({
           .collect();
         
         // Determine the best photo to show:
-        // 1. If plant.imageUrl is a user photo (starts with data:image), use it
+        // 1. If plant.imageUrl exists (user's chosen default), use it
         // 2. Otherwise, use the most recent user photo
+        // 3. Finally, fallback to reference image from similar_images
         let displayPhoto = null;
-        if (plant.imageUrl && plant.imageUrl.startsWith('data:image')) {
-          // The plant's imageUrl is a user photo, so use it
+        if (plant.imageUrl) {
+          // The plant's imageUrl is the user's chosen default photo
           displayPhoto = plant.imageUrl;
         } else if (allSightings.length > 0) {
-          // Use the most recent user photo
+          // Use the most recent user photo as fallback
           displayPhoto = allSightings[0]?.photoUri || null;
+        } else if (plant.similar_images && plant.similar_images.length > 0) {
+          // Fallback to reference image
+          displayPhoto = plant.similar_images[0];
         }
         
         return {
@@ -1523,21 +1528,37 @@ export const getRecentlyIdentified = query({
       .order("desc")
       .take(limit);
     
-    // For each plant, get the most recent user photo
+    // For each plant, get the default photo or most recent user photo
     const plantsWithPhotos = await Promise.all(
       plants.map(async (plant) => {
-        const latestSighting = await ctx.db
+        const allSightings = await ctx.db
           .query("sightings")
           .withIndex("plantId", (q) => q.eq("plantId", plant._id))
           .order("desc")
-          .first();
+          .collect();
+        
+        // Determine the best photo to show:
+        // 1. If plant.imageUrl exists (user's chosen default), use it
+        // 2. Otherwise, use the most recent user photo
+        // 3. Finally, fallback to reference image from similar_images
+        let displayPhoto = null;
+        if (plant.imageUrl) {
+          // The plant's imageUrl is the user's chosen default photo
+          displayPhoto = plant.imageUrl;
+        } else if (allSightings.length > 0) {
+          // Use the most recent user photo as fallback
+          displayPhoto = allSightings[0]?.photoUri || null;
+        } else if (plant.similar_images && plant.similar_images.length > 0) {
+          // Fallback to reference image
+          displayPhoto = plant.similar_images[0];
+        }
         
         return {
           _id: plant._id,
           scientificName: plant.scientificName,
           commonNames: plant.commonNames,
           medicinalTags: plant.medicinalTags,
-          latestUserPhoto: latestSighting?.photoUri || null,
+          latestUserPhoto: displayPhoto,
           identifiedAt: plant.createdAt,
         };
       })
@@ -2582,7 +2603,7 @@ export const generateConfirmationQuestions = action({
           messages: [
             {
               role: "system",
-              content: `You are a botanical expert specializing in plant identification. Your task is to generate 3-4 specific, distinguishing questions that help confirm if a user's photo matches a particular plant species.
+              content: `You are a botanical expert specializing in plant identification. Your task is to generate 4-5 specific, distinguishing questions that help confirm if a user's photo matches a particular plant species.
 
 IMPORTANT GUIDELINES:
 1. Focus on VISIBLE morphological features that can be observed in photos
@@ -2591,14 +2612,17 @@ IMPORTANT GUIDELINES:
 4. Make questions clear and answerable by someone looking at a photo
 5. Provide 3-4 multiple choice options for each question
 6. Include reasoning for why each question helps with identification
+7. Use simple language and explain botanical terms in parentheses
+8. Include questions about smell and taste when relevant (e.g., "Does it have a strong smell when crushed?")
+9. Make questions accessible to non-experts
 
 Return ONLY a JSON array with this exact structure:
 [
   {
     "id": "unique_id_1",
-    "question": "What is the texture of the leaves?",
-    "options": ["Smooth", "Hairy", "Rough", "Waxy"],
-    "correctAnswer": "Hairy",
+    "question": "What is the texture of the leaves? (Feel the leaf surface with your finger)",
+    "options": ["Smooth", "Hairy (tiny hairs)", "Rough", "Waxy (shiny surface)"],
+    "correctAnswer": "Hairy (tiny hairs)",
     "reasoning": "This species has distinctive fine hairs on the leaf surface that are visible in good photos"
   }
 ]
@@ -2622,12 +2646,42 @@ Description: ${description}`
       console.log('📦 Raw OpenAI confirmation questions:', content);
 
       try {
-        const questions = JSON.parse(content);
-        console.log(`✅ Generated ${questions.length} confirmation questions`);
+        // Some models wrap JSON in markdown code fences. Strip them if present.
+        let jsonString = content.trim();
+        if (jsonString.startsWith("```")) {
+          // Remove first ``` and optional language identifier
+          jsonString = jsonString.replace(/^```[a-zA-Z]*\n?/, "");
+          // Remove trailing ```
+          jsonString = jsonString.replace(/```$/, "");
+        }
         
-        return { questions };
+        const questions = JSON.parse(jsonString);
+        
+        // Validate and clean up questions
+        const validatedQuestions = questions.map((q: any, index: number) => {
+          if (!q.correctAnswer) {
+            console.warn(`⚠️ Question ${index + 1} missing correctAnswer:`, q);
+            // Try to infer correct answer from options if possible
+            if (q.options && q.options.length > 0) {
+              q.correctAnswer = q.options[0]; // Fallback to first option
+            }
+          }
+          return {
+            id: q.id || `question_${index + 1}`,
+            question: q.question || 'Unknown question',
+            options: q.options || [],
+            correctAnswer: q.correctAnswer || 'Unknown',
+            reasoning: q.reasoning || 'No reasoning provided'
+          };
+        });
+        
+        console.log(`✅ Generated ${validatedQuestions.length} confirmation questions`);
+        console.log('📋 Validated questions:', validatedQuestions);
+        
+        return { questions: validatedQuestions };
       } catch (error) {
         console.error('❌ Error parsing confirmation questions:', error);
+        console.error('Raw content:', content);
         throw new Error('Failed to parse confirmation questions');
       }
     } catch (error) {
@@ -2635,4 +2689,401 @@ Description: ${description}`
       throw new Error('Failed to generate confirmation questions');
     }
   },
+});
+
+export const refineIdentificationWithDescription = action({
+  args: {
+    scientificName: v.string(),
+    userDescription: v.string(),
+    currentConfidence: v.number(),
+    userPhotoBase64: v.string()
+  },
+  handler: async (ctx, args) => {
+    const { scientificName, userDescription, currentConfidence, userPhotoBase64 } = args;
+
+    console.log('🔍 Refining identification with user description');
+    console.log('Current confidence:', currentConfidence);
+    console.log('User description:', userDescription);
+
+    try {
+      // Get plant details from database
+      const plant = await ctx.runQuery(api.identifyPlant.getPlantDetails, {
+        scientificName: scientificName
+      });
+
+      // If plant not in database, create a basic analysis without database details
+      if (!plant) {
+        console.log('⚠️ Plant not found in database, using basic analysis');
+        return await analyzeWithoutDatabase(scientificName, userDescription, currentConfidence);
+      }
+
+      // Use OpenAI to analyze the user description against the plant
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "system",
+              content: "You are a botanical expert specializing in plant identification. Provide accurate, helpful analysis."
+            },
+            {
+              role: "user",
+              content: `You are a botanical expert. Analyze the user's description of a plant they photographed and compare it to the known characteristics of ${scientificName}.
+
+Plant: ${scientificName}
+Common Names: ${plant.commonNames?.join(', ') || 'Unknown'}
+Description: ${plant.traditionalUsage || 'No description available'}
+
+User's Description: ${userDescription}
+Current AI Confidence: ${currentConfidence}%
+
+Provide a detailed analysis that explains WHY the confidence should change. Be specific about:
+
+1. **Matching Features**: Which described features strongly support this identification?
+2. **Contradicting Features**: Which described features don't match or suggest a different species?
+3. **Key Differences**: What specific characteristics would help distinguish this from similar species?
+4. **Environmental Factors**: How do growing conditions, season, or location affect the appearance?
+
+Return ONLY a JSON object with this exact structure:
+{
+  "refinedConfidence": 85,
+  "detailedReasoning": "Your description mentions 'cone-shaped yellow inflorescences' which is a KEY identifying feature of ${scientificName}. However, you mentioned 'smooth leaves' when this species typically has fine hairs. The height description matches perfectly. Overall, the inflorescence shape is so distinctive that it strongly supports this identification despite the leaf texture discrepancy.",
+  "matchingFeatures": ["Cone-shaped inflorescences", "Yellow color", "Tall growth habit"],
+  "contradictingFeatures": ["Smooth leaves (should be hairy)"],
+  "keyDistinguishingFeatures": ["Inflorescence shape is the most reliable identifier", "Check for fine hairs on leaf undersides", "Stem should be thick and upright"],
+  "environmentalNotes": "Young plants may have less prominent hairs. Check if growing in shade vs sun.",
+  "suggestions": ["Take a close-up photo of the leaf surface", "Check if hairs are visible on leaf undersides", "Compare inflorescence shape with reference images"],
+  "similarSpecies": ["Zingiber zerumbet (has different inflorescence shape)", "Zingiber officinale (much smaller, different growth habit)"],
+  "confidenceExplanation": "The distinctive inflorescence shape is the strongest identifier for this species, outweighing the leaf texture discrepancy. This is likely the correct identification."
+}
+
+The refinedConfidence should be between 0-100, reflecting how well the user's description supports the identification. Be specific about what caused the confidence change.`
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 500
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`OpenAI API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const responseContent = data.choices[0]?.message?.content;
+      if (!responseContent) {
+        throw new Error('No response from OpenAI');
+      }
+
+      console.log('🤖 OpenAI refinement response:', responseContent);
+
+      // Parse the JSON response
+      let result;
+      try {
+        // Some models wrap JSON in markdown code fences. Strip them if present.
+        let jsonString = responseContent.trim();
+        if (jsonString.startsWith("```")) {
+          // Remove first ``` and optional language identifier
+          jsonString = jsonString.replace(/^```[a-zA-Z]*\n?/, "");
+          // Remove trailing ```
+          jsonString = jsonString.replace(/```$/, "");
+        }
+        
+        result = JSON.parse(jsonString);
+      } catch (parseError) {
+        console.error('Failed to parse OpenAI response:', parseError);
+        // Fallback: provide a basic analysis
+        result = {
+          refinedConfidence: Math.max(0, currentConfidence - 10),
+          reasoning: "Unable to parse detailed analysis, but the description may indicate a different species.",
+          suggestions: ["Try taking more photos", "Check for similar species in your area"]
+        };
+      }
+
+      // Ensure confidence is within bounds
+      result.refinedConfidence = Math.max(0, Math.min(100, result.refinedConfidence));
+
+      console.log('✅ Refined confidence:', result.refinedConfidence);
+
+      return {
+        refinedConfidence: result.refinedConfidence,
+        detailedReasoning: result.detailedReasoning || result.reasoning || "Analysis completed",
+        matchingFeatures: result.matchingFeatures || [],
+        contradictingFeatures: result.contradictingFeatures || [],
+        keyDistinguishingFeatures: result.keyDistinguishingFeatures || [],
+        environmentalNotes: result.environmentalNotes || "",
+        suggestions: result.suggestions || [],
+        similarSpecies: result.similarSpecies || [],
+        confidenceExplanation: result.confidenceExplanation || ""
+      };
+
+    } catch (error) {
+      console.error('❌ Error refining identification:', error);
+      throw new Error('Failed to refine identification');
+    }
+  }
+});
+
+export const getPlantDetails = query({
+  args: { scientificName: v.string() },
+  handler: async (ctx, args) => {
+    const { scientificName } = args;
+    
+    try {
+      const plant = await ctx.db
+        .query("plants")
+        .withIndex("scientificName", (q) => q.eq("scientificName", scientificName))
+        .first();
+      
+      return plant || null;
+    } catch (error) {
+      console.error('Error fetching plant details:', error);
+      return null;
+    }
+  },
+});
+
+// Helper function to analyze plant descriptions without database lookup
+async function analyzeWithoutDatabase(scientificName: string, userDescription: string, currentConfidence: number) {
+  console.log('🔍 Analyzing plant description without database lookup');
+  
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: "You are a botanical expert specializing in plant identification. Provide accurate, helpful analysis."
+          },
+          {
+            role: "user",
+            content: `You are a botanical expert. Analyze the user's description of a plant they photographed and compare it to the known characteristics of ${scientificName}.
+
+Plant: ${scientificName}
+Note: This plant is not in our detailed database, so analyze based on general botanical knowledge.
+
+User's Description: ${userDescription}
+Current AI Confidence: ${currentConfidence}%
+
+Provide a detailed analysis that explains WHY the confidence should change. Be specific about:
+
+1. **Matching Features**: Which described features strongly support this identification?
+2. **Contradicting Features**: Which described features don't match or suggest a different species?
+3. **Key Differences**: What specific characteristics would help distinguish this from similar species?
+4. **Environmental Factors**: How do growing conditions, season, or location affect the appearance?
+
+Return ONLY a JSON object with this exact structure:
+{
+  "refinedConfidence": 85,
+  "detailedReasoning": "Your description mentions 'cone-shaped yellow inflorescences' which is a KEY identifying feature of ${scientificName}. However, you mentioned 'smooth leaves' when this species typically has fine hairs. The height description matches perfectly. Overall, the inflorescence shape is so distinctive that it strongly supports this identification despite the leaf texture discrepancy.",
+  "matchingFeatures": ["Cone-shaped inflorescences", "Yellow color", "Tall growth habit"],
+  "contradictingFeatures": ["Smooth leaves (should be hairy)"],
+  "keyDistinguishingFeatures": ["Inflorescence shape is the most reliable identifier", "Check for fine hairs on leaf undersides", "Stem should be thick and upright"],
+  "environmentalNotes": "Young plants may have less prominent hairs. Check if growing in shade vs sun.",
+  "suggestions": ["Take a close-up photo of the leaf surface", "Check if hairs are visible on leaf undersides", "Compare inflorescence shape with reference images"],
+  "similarSpecies": ["Zingiber zerumbet (has different inflorescence shape)", "Zingiber officinale (much smaller, different growth habit)"],
+  "confidenceExplanation": "The distinctive inflorescence shape is the strongest identifier for this species, outweighing the leaf texture discrepancy. This is likely the correct identification."
+}
+
+The refinedConfidence should be between 0-100, reflecting how well the user's description supports the identification. Be specific about what caused the confidence change.`
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 500
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`OpenAI API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const responseContent = data.choices[0]?.message?.content;
+    if (!responseContent) {
+      throw new Error('No response from OpenAI');
+    }
+
+    console.log('🤖 OpenAI basic analysis response:', responseContent);
+
+    // Parse the JSON response
+    let result;
+    try {
+      // Some models wrap JSON in markdown code fences. Strip them if present.
+      let jsonString = responseContent.trim();
+      if (jsonString.startsWith("```")) {
+        // Remove first ``` and optional language identifier
+        jsonString = jsonString.replace(/^```[a-zA-Z]*\n?/, "");
+        // Remove trailing ```
+        jsonString = jsonString.replace(/```$/, "");
+      }
+      
+      result = JSON.parse(jsonString);
+    } catch (parseError) {
+      console.error('Failed to parse OpenAI response:', parseError);
+      // Fallback: provide a basic analysis
+      result = {
+        refinedConfidence: Math.max(0, currentConfidence - 10),
+        reasoning: "Unable to parse detailed analysis, but the description may indicate a different species.",
+        suggestions: ["Try taking more photos", "Check for similar species in your area"]
+      };
+    }
+
+    // Ensure confidence is within bounds
+    result.refinedConfidence = Math.max(0, Math.min(100, result.refinedConfidence));
+
+    console.log('✅ Basic analysis confidence:', result.refinedConfidence);
+
+    return {
+      refinedConfidence: result.refinedConfidence,
+      detailedReasoning: result.detailedReasoning || result.reasoning || "Analysis completed",
+      matchingFeatures: result.matchingFeatures || [],
+      contradictingFeatures: result.contradictingFeatures || [],
+      keyDistinguishingFeatures: result.keyDistinguishingFeatures || [],
+      environmentalNotes: result.environmentalNotes || "",
+      suggestions: result.suggestions || [],
+      similarSpecies: result.similarSpecies || [],
+      confidenceExplanation: result.confidenceExplanation || ""
+    };
+
+  } catch (error) {
+    console.error('❌ Error in basic analysis:', error);
+    // Return a conservative fallback
+    return {
+      refinedConfidence: Math.max(0, currentConfidence - 15),
+      reasoning: "Unable to perform detailed analysis. Consider taking more photos or checking similar species.",
+      suggestions: ["Take photos from different angles", "Check local plant guides", "Consider similar species"]
+    };
+  }
+}
+
+export const saveConfirmationInteraction = internalMutation({
+  args: {
+    plantId: v.id("plants"),
+    scientificName: v.string(),
+    userAnswers: v.array(v.object({
+      questionId: v.string(),
+      question: v.string(),
+      userAnswer: v.string(),
+      correctAnswer: v.optional(v.string()),
+      reasoning: v.string()
+    })),
+    finalConfidence: v.number(),
+    refinedAnalysis: v.optional(v.object({
+      detailedReasoning: v.string(),
+      matchingFeatures: v.array(v.string()),
+      contradictingFeatures: v.array(v.string()),
+      keyDistinguishingFeatures: v.array(v.string()),
+      environmentalNotes: v.string(),
+      suggestions: v.array(v.string()),
+      similarSpecies: v.array(v.string()),
+      confidenceExplanation: v.string()
+    })),
+    userPhotoBase64: v.string(),
+    timestamp: v.number()
+  },
+  handler: async (ctx, args) => {
+    const { 
+      plantId, 
+      scientificName, 
+      userAnswers, 
+      finalConfidence, 
+      refinedAnalysis, 
+      userPhotoBase64, 
+      timestamp 
+    } = args;
+
+    console.log('💾 Saving confirmation interaction for:', scientificName);
+
+    try {
+      // Create a comprehensive feedback entry
+      const feedbackData = {
+        plantId,
+        scientificName,
+        feedback: JSON.stringify({
+          type: 'confirmation_interaction',
+          userAnswers,
+          finalConfidence,
+          refinedAnalysis,
+          userPhotoBase64: userPhotoBase64.substring(0, 100) + '...', // Truncate for storage
+          timestamp
+        }),
+        timestamp
+      };
+
+      await ctx.db.insert("plant_feedback", feedbackData);
+      
+      console.log('✅ Confirmation interaction saved successfully');
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error saving confirmation interaction:', error);
+      throw new Error('Failed to save confirmation interaction');
+    }
+  }
+});
+
+export const saveUserConfirmation = action({
+  args: {
+    plantId: v.id("plants"),
+    scientificName: v.string(),
+    userAnswers: v.array(v.object({
+      questionId: v.string(),
+      question: v.string(),
+      userAnswer: v.string(),
+      correctAnswer: v.optional(v.string()),
+      reasoning: v.string()
+    })),
+    finalConfidence: v.number(),
+    refinedAnalysis: v.optional(v.object({
+      detailedReasoning: v.string(),
+      matchingFeatures: v.array(v.string()),
+      contradictingFeatures: v.array(v.string()),
+      keyDistinguishingFeatures: v.array(v.string()),
+      environmentalNotes: v.string(),
+      suggestions: v.array(v.string()),
+      similarSpecies: v.array(v.string()),
+      confidenceExplanation: v.string()
+    })),
+    userPhotoBase64: v.string()
+  },
+  handler: async (ctx, args) => {
+    const { 
+      plantId, 
+      scientificName, 
+      userAnswers, 
+      finalConfidence, 
+      refinedAnalysis, 
+      userPhotoBase64 
+    } = args;
+
+    console.log('💾 Saving user confirmation for:', scientificName);
+
+    try {
+      await ctx.runMutation(internal.identifyPlant.saveConfirmationInteraction, {
+        plantId,
+        scientificName,
+        userAnswers,
+        finalConfidence,
+        refinedAnalysis,
+        userPhotoBase64,
+        timestamp: Date.now()
+      });
+      
+      console.log('✅ User confirmation saved successfully');
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error saving user confirmation:', error);
+      throw new Error('Failed to save user confirmation');
+    }
+  }
 });

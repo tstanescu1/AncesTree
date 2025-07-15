@@ -122,6 +122,7 @@ export default function PlantDetailView({
     const [showMedicinalQAModal, setShowMedicinalQAModal] = useState(false);
     const [showChatView, setShowChatView] = useState(false);
     const [showLocationsView, setShowLocationsView] = useState(false);
+    const [showLocationSection, setShowLocationSection] = useState(false);
 
     // Handler functions for location picker
     const handleOpenLocationPicker = () => {
@@ -279,207 +280,21 @@ export default function PlantDetailView({
             
             {plantDetail && !('error' in plantDetail) && (
                 <View style={{ width: '100%', maxWidth: 400 }}>
-                    {/* Reference Image - Show the actual default photo (user or database) */}
-                    {(() => {
-                        // Determine what the primary reference photo should be
-                        const hasUserPhotos = plantDetail.userPhotos && plantDetail.userPhotos.length > 0;
-                        const hasDatabaseImage = plantDetail.imageUrl;
-                        const hasValidSimilarImages = plantDetail.similar_images && plantDetail.similar_images.length > 0;
-                        
-                        // Debug logging
-                        console.log('🔍 Reference photo detection:');
-                        console.log('📸 hasUserPhotos:', hasUserPhotos);
-                        console.log('🗂️ hasDatabaseImage:', hasDatabaseImage);
-                        console.log('📊 hasValidSimilarImages:', hasValidSimilarImages);
-                        console.log('🖼️ imageUrl:', plantDetail.imageUrl);
-                        console.log('🗂️ similar_images[0]:', plantDetail.similar_images?.[0]);
-                        console.log('🗂️ similar_images length:', plantDetail.similar_images?.length);
-                        
-                        // If imageUrl exists and matches the first similar_image, it was set as default
-                        const isDatabaseImageDefault = hasDatabaseImage && hasValidSimilarImages && 
-                                                     plantDetail.imageUrl === plantDetail.similar_images[0];
-                        
-                        console.log('✅ isDatabaseImageDefault:', isDatabaseImageDefault);
-                        
-                        // Show database image as reference if it was explicitly set as default
-                        if (isDatabaseImageDefault) {
-                            console.log('🖼️ Showing database image as reference photo');
-                            return (
-                                <View style={{ marginBottom: 16 }}>
-                                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>📸 Reference Photo</Text>
-                                    <TouchableOpacity onPress={() => setZoomedImage(plantDetail.imageUrl)}>
-                                        <View style={{ position: 'relative' }}>
-                                            <Image 
-                                                source={{ uri: plantDetail.imageUrl }} 
-                                                style={{ 
-                                                    width: '100%', 
-                                                    height: 192, 
-                                                    borderRadius: 8,
-                                                    backgroundColor: '#f3f4f6'
-                                                }} 
-                                                resizeMode="cover"
-                                            />
-                                            
-                                            {/* Default photo badge */}
-                                            <View style={{
-                                                position: 'absolute',
-                                                top: 8,
-                                                right: 8,
-                                                backgroundColor: 'rgba(16, 185, 129, 0.95)',
-                                                paddingHorizontal: 8,
-                                                paddingVertical: 4,
-                                                borderRadius: 6,
-                                                shadowColor: '#000',
-                                                shadowOffset: { width: 0, height: 1 },
-                                                shadowOpacity: 0.2,
-                                                shadowRadius: 2,
-                                                elevation: 2,
-                                            }}>
-                                                <Text style={{ color: 'white', fontSize: 11, fontWeight: '700' }}>
-                                                    ⭐ Default
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    </TouchableOpacity>
-                                    <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                                        Database reference photo set as default
-                                    </Text>
-                                </View>
-                            );
-                        }
-                        
-                        // Show user photo as reference if we have user photos and no database default
-                        if (hasUserPhotos) {
-                            console.log('📸 Showing user photo as reference photo');
-                            return (
-                                <View style={{ marginBottom: 16 }}>
-                                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>📸 Your Reference Photo</Text>
-                                    <TouchableOpacity onPress={() => {
-                                        if (plantDetail.userPhotos[0]) setZoomedImage(plantDetail.userPhotos[0]);
-                                    }}>
-                                        <View style={{ position: 'relative' }}>
-                                            <Image 
-                                                source={{ uri: plantDetail.userPhotos[0].startsWith('data:') ? plantDetail.userPhotos[0] : `data:image/jpeg;base64,${plantDetail.userPhotos[0]}` }} 
-                                                style={{ 
-                                                    width: '100%', 
-                                                    height: 192, 
-                                                    borderRadius: 8,
-                                                    backgroundColor: '#f3f4f6'
-                                                }} 
-                                                resizeMode="cover"
-                                            />
-                                            
-                                            {/* Default photo badge */}
-                                            <View style={{
-                                                position: 'absolute',
-                                                top: 8,
-                                                right: 8,
-                                                backgroundColor: 'rgba(16, 185, 129, 0.95)',
-                                                paddingHorizontal: 8,
-                                                paddingVertical: 4,
-                                                borderRadius: 6,
-                                                shadowColor: '#000',
-                                                shadowOffset: { width: 0, height: 1 },
-                                                shadowOpacity: 0.2,
-                                                shadowRadius: 2,
-                                                elevation: 2,
-                                            }}>
-                                                <Text style={{ color: 'white', fontSize: 11, fontWeight: '700' }}>
-                                                    ⭐ Default
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    </TouchableOpacity>
-                                    <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                                        Your main reference photo for this plant species
-                                    </Text>
-                                </View>
-                            );
-                        }
-                        
-                        // Fallback to database image if no user photos
-                        if (hasDatabaseImage) {
-                            console.log('🗂️ Showing fallback database image as reference photo');
-                            return (
-                                <View style={{ marginBottom: 16 }}>
-                                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>📸 Reference Photo</Text>
-                                    <TouchableOpacity onPress={() => setZoomedImage(plantDetail.imageUrl)}>
-                                        <View style={{ position: 'relative' }}>
-                                            <Image 
-                                                source={{ uri: plantDetail.imageUrl }} 
-                                                style={{ 
-                                                    width: '100%', 
-                                                    height: 192, 
-                                                    borderRadius: 8,
-                                                    backgroundColor: '#f3f4f6'
-                                                }} 
-                                                resizeMode="cover"
-                                            />
-                                            
-                                            {/* Default photo badge */}
-                                            <View style={{
-                                                position: 'absolute',
-                                                top: 8,
-                                                right: 8,
-                                                backgroundColor: 'rgba(16, 185, 129, 0.95)',
-                                                paddingHorizontal: 8,
-                                                paddingVertical: 4,
-                                                borderRadius: 6,
-                                                shadowColor: '#000',
-                                                shadowOffset: { width: 0, height: 1 },
-                                                shadowOpacity: 0.2,
-                                                shadowRadius: 2,
-                                                elevation: 2,
-                                            }}>
-                                                <Text style={{ color: 'white', fontSize: 11, fontWeight: '700' }}>
-                                                    ⭐ Default
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    </TouchableOpacity>
-                                    <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                                        Database reference photo for this plant species
-                                    </Text>
-                                </View>
-                            );
-                        }
-                        
-                        console.log('❌ No reference photo available');
-                        return null;
-                    })()}
-
                     {/* Comprehensive Photo Gallery - All images in one place */}
-                    {((plantDetail.userPhotos && plantDetail.userPhotos.length > 1) || (plantDetail.similar_images && plantDetail.similar_images.length > 0) || true) && (
+                    {((plantDetail.userPhotos && plantDetail.userPhotos.length > 0) || (plantDetail.similar_images && plantDetail.similar_images.length > 0) || true) && (
                         <View style={{ marginBottom: 16 }}>
-                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>
-                                🖼️ Photo Gallery
-                            </Text>
+
                             <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
                                 {(() => {
-                                    // Determine if database image is default to calculate correct counts
-                                    const hasUserPhotos = plantDetail.userPhotos && plantDetail.userPhotos.length > 0;
-                                    const hasDatabaseImage = plantDetail.imageUrl;
-                                    const hasValidSimilarImages = plantDetail.similar_images && plantDetail.similar_images.length > 0;
-                                    const isDatabaseImageDefault = hasDatabaseImage && hasValidSimilarImages && 
-                                                                 plantDetail.imageUrl === plantDetail.similar_images[0];
-                                    
-                                    // Count photos correctly based on what's shown as reference
-                                    const userPhotoCount = isDatabaseImageDefault 
-                                        ? (plantDetail.userPhotos ? plantDetail.userPhotos.length : 0)  // Show all user photos
-                                        : (plantDetail.userPhotos ? plantDetail.userPhotos.length - 1 : 0); // Skip reference photo
-                                    
+                                    // Simplified photo count calculation - show all photos
+                                    const userPhotoCount = plantDetail.userPhotos ? plantDetail.userPhotos.length : 0;
                                     const databasePhotoCount = plantDetail.similar_images ? plantDetail.similar_images.length : 0;
                                     const totalCount = userPhotoCount + databasePhotoCount;
-                                    
-                                    console.log(`📊 Photo count calculation: isDatabaseImageDefault=${isDatabaseImageDefault}`);
-                                    console.log(`📊 User photos in gallery: ${userPhotoCount}`);
-                                    console.log(`📊 Database photos: ${databasePhotoCount}`);
-                                    console.log(`📊 Total in gallery: ${totalCount}`);
                                     
                                     if (userPhotoCount > 0 && databasePhotoCount > 0) {
                                         return `${userPhotoCount} your photos • ${databasePhotoCount} database images • ${totalCount} total`;
                                     } else if (userPhotoCount > 0) {
-                                        return `${userPhotoCount} ${isDatabaseImageDefault ? 'photos of your plant' : 'additional photos of your plant'}`;
+                                        return `${userPhotoCount} photos of your plant`;
                                     } else if (databasePhotoCount > 0) {
                                         return `${databasePhotoCount} reference images from community database`;
                                     }
@@ -488,94 +303,17 @@ export default function PlantDetailView({
                             </Text>
                             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
                                 <View style={{ flexDirection: 'row', gap: 8 }}>
-                                    {/* Add Photo Button - First item in gallery */}
-                                    <TouchableOpacity 
-                                        style={{
-                                            width: 120,
-                                            height: 120,
-                                            borderRadius: 8,
-                                            backgroundColor: loading ? '#f3f4f6' : '#f0fdf4',
-                                            borderWidth: 2,
-                                            borderColor: loading ? '#d1d5db' : '#bbf7d0',
-                                            borderStyle: 'dashed',
-                                            justifyContent: 'center',
-                                            alignItems: 'center',
-                                            position: 'relative',
-                                            opacity: loading ? 0.7 : 1
-                                        }}
-                                        onPress={addPhotoToPlant}
-                                        disabled={loading}
-                                        activeOpacity={0.7}
-                                    >
-                                        {loading ? (
-                                            <>
-                                                <ActivityIndicator size="small" color="#059669" style={{ marginBottom: 4 }} />
-                                                <Text style={{ 
-                                                    fontSize: 11, 
-                                                    fontWeight: '600', 
-                                                    color: '#059669',
-                                                    textAlign: 'center',
-                                                    paddingHorizontal: 8
-                                                }}>
-                                                    Adding...
-                                                </Text>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Text style={{ fontSize: 24, marginBottom: 4 }}>📸</Text>
-                                                <Text style={{ 
-                                                    fontSize: 11, 
-                                                    fontWeight: '600', 
-                                                    color: '#059669',
-                                                    textAlign: 'center',
-                                                    paddingHorizontal: 8
-                                                }}>
-                                                    Add Photo
-                                                </Text>
-                                                
-                                                {/* Pulse animation hint */}
-                                                <View style={{
-                                                    position: 'absolute',
-                                                    top: 8,
-                                                    right: 8,
-                                                    width: 8,
-                                                    height: 8,
-                                                    borderRadius: 4,
-                                                    backgroundColor: '#10b981'
-                                                }} />
-                                            </>
-                                        )}
-                                    </TouchableOpacity>
-
                                     {/* User's photos in gallery */}
                                     {plantDetail.userPhotos && plantDetail.userPhotos.length > 0 && (() => {
-                                        // Determine if we should show all user photos or skip the first one
-                                        const hasUserPhotos = plantDetail.userPhotos && plantDetail.userPhotos.length > 0;
-                                        const hasDatabaseImage = plantDetail.imageUrl;
-                                        const hasValidSimilarImages = plantDetail.similar_images && plantDetail.similar_images.length > 0;
-                                        const isDatabaseImageDefault = hasDatabaseImage && hasValidSimilarImages && 
-                                                                     plantDetail.imageUrl === plantDetail.similar_images[0];
-                                        
-                                        // If database image is default, show ALL user photos
-                                        // If user photo is default, skip the first user photo (since it's shown as reference)
-                                        const userPhotosToShow = isDatabaseImageDefault ? plantDetail.userPhotos : plantDetail.userPhotos.slice(1);
-                                        const startIndex = isDatabaseImageDefault ? 0 : 1;
-                                        
-                                        console.log(`📸 Gallery logic: isDatabaseImageDefault=${isDatabaseImageDefault}`);
-                                        console.log(`📸 Total user photos: ${plantDetail.userPhotos.length}`);
-                                        console.log(`📸 Photos to show in gallery: ${userPhotosToShow.length}`);
-                                        console.log(`📸 Starting index: ${startIndex}`);
-                                        
-                                        return userPhotosToShow.map((photo: string, index: number) => {
-                                            const actualIndex = startIndex + index; // Adjust for proper sighting mapping
-                                            
+                                        // Show all user photos since we removed the reference photo section
+                                        return plantDetail.userPhotos.map((photo: string, index: number) => {
                                             // Debug logging for user photos (without flooding console)
-                                            console.log(`📸 User photo ${actualIndex}: ${photo.substring(0, 20)}...`);
-                                            console.log(`🔍 Corresponding sighting: ${plantDetail.allSightings?.[actualIndex]?._id}`);
+                                            console.log(` User photo ${index}: ${photo.substring(0, 20)}...`);
+                                            console.log(`🔍 Corresponding sighting: ${plantDetail.allSightings?.[index]?._id}`);
                                             
                                             return (
                                                 <View 
-                                                    key={`user-${actualIndex}`} 
+                                                    key={`user-${index}`} 
                                                     style={{ position: 'relative' }}
                                                 >
                                                     <TouchableOpacity 
@@ -592,12 +330,12 @@ export default function PlantDetailView({
                                                                     {
                                                                         text: "🖼️ Set as Default",
                                                                         onPress: () => {
-                                                                            const sighting = plantDetail.allSightings?.[actualIndex];
+                                                                            const sighting = plantDetail.allSightings?.[index];
                                                                             if (sighting) {
                                                                                 console.log(`🖼️ Setting user photo as default: sighting ${sighting._id}`);
                                                                                 handleSetDefaultPhoto(sighting._id);
                                                                             } else {
-                                                                                console.error(`❌ Could not find sighting for photo ${actualIndex}`);
+                                                                                console.error(`❌ Could not find sighting for photo ${index}`);
                                                                                 Alert.alert('Error', 'Could not find associated photo data');
                                                                             }
                                                                         }
@@ -615,12 +353,12 @@ export default function PlantDetailView({
                                                                                         text: "Delete",
                                                                                         style: "destructive",
                                                                                         onPress: () => {
-                                                                                            const sighting = plantDetail.allSightings?.[actualIndex];
-                                                                                                                                                                                         if (sighting) {
-                                                                                                 console.log(`🗑️ Deleting user photo: sighting ${sighting._id}`);
-                                                                                                 handleDeleteSighting(sighting._id, actualIndex);
-                                                                                             } else {
-                                                                                                 console.error(`❌ Could not find sighting for photo ${actualIndex}`);
+                                                                                            const sighting = plantDetail.allSightings?.[index];
+                                                                                            if (sighting) {
+                                                                                                console.log(`🗑️ Deleting user photo: sighting ${sighting._id}`);
+                                                                                                handleDeleteSighting(sighting._id, index);
+                                                                                            } else {
+                                                                                                console.error(`❌ Could not find sighting for photo ${index}`);
                                                                                                 Alert.alert('Error', 'Could not find associated photo data');
                                                                                             }
                                                                                         }
@@ -795,11 +533,70 @@ export default function PlantDetailView({
                                             </View>
                                         </TouchableOpacity>
                                     ))}
+
+                                    {/* Add Photo Button - Moved to end of gallery */}
+                                    <TouchableOpacity 
+                                        style={{
+                                            width: 120,
+                                            height: 120,
+                                            borderRadius: 8,
+                                            backgroundColor: loading ? '#f3f4f6' : '#f0fdf4',
+                                            borderWidth: 2,
+                                            borderColor: loading ? '#d1d5db' : '#bbf7d0',
+                                            borderStyle: 'dashed',
+                                            justifyContent: 'center',
+                                            alignItems: 'center',
+                                            position: 'relative',
+                                            opacity: loading ? 0.7 : 1
+                                        }}
+                                        onPress={addPhotoToPlant}
+                                        disabled={loading}
+                                        activeOpacity={0.7}
+                                    >
+                                        {loading ? (
+                                            <>
+                                                <ActivityIndicator size="small" color="#059669" style={{ marginBottom: 4 }} />
+                                                <Text style={{ 
+                                                    fontSize: 11, 
+                                                    fontWeight: '600', 
+                                                    color: '#059669',
+                                                    textAlign: 'center',
+                                                    paddingHorizontal: 8
+                                                }}>
+                                                    Adding...
+                                                </Text>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Text style={{ fontSize: 24, marginBottom: 4 }}>📸</Text>
+                                                <Text style={{ 
+                                                    fontSize: 11, 
+                                                    fontWeight: '600', 
+                                                    color: '#059669',
+                                                    textAlign: 'center',
+                                                    paddingHorizontal: 8
+                                                }}>
+                                                    Add Photo
+                                                </Text>
+                                                
+                                                {/* Pulse animation hint */}
+                                                <View style={{
+                                                    position: 'absolute',
+                                                    top: 8,
+                                                    right: 8,
+                                                    width: 8,
+                                                    height: 8,
+                                                    borderRadius: 4,
+                                                    backgroundColor: '#10b981'
+                                                }} />
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
                                 </View>
                             </ScrollView>
                             
                             <Text style={{ fontSize: 11, color: '#6b7280', textAlign: 'center', marginTop: 4 }}>
-                                💡 Tap to zoom • Long press your photos for options • Hold database images for actions • Hold to set default or delete
+                                💡 Tap to zoom • Long press your photos for options
                             </Text>
                         </View>
                     )}
@@ -837,54 +634,109 @@ export default function PlantDetailView({
                     {/* Simple Location Section */}
                     {plantDetail.allSightings && plantDetail.allSightings.some((s: any) => s.latitude && s.longitude) && (
                         <View style={{ marginBottom: 16, padding: 14, backgroundColor: '#f8fafc', borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0' }}>
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                            <TouchableOpacity 
+                                style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: showLocationSection ? 12 : 0 }}
+                                onPress={() => setShowLocationSection(!showLocationSection)}
+                                activeOpacity={0.7}
+                            >
                                 <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151' }}>
-                                    📍 Location
+                                    📍 Locations & Observations
                                 </Text>
-                                {plantDetail.allSightings.filter((s: any) => s.latitude && s.longitude).length > 1 && (
-                                    <TouchableOpacity
-                                        style={{
-                                            backgroundColor: '#059669',
-                                            paddingHorizontal: 12,
-                                            paddingVertical: 6,
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    {plantDetail.allSightings.filter((s: any) => s.latitude && s.longitude).length > 1 && showLocationSection && (
+                                        <TouchableOpacity
+                                            style={{
+                                                backgroundColor: '#059669',
+                                                paddingHorizontal: 12,
+                                                paddingVertical: 6,
+                                                borderRadius: 6,
+                                            }}
+                                            onPress={() => setShowLocationsView(true)}
+                                        >
+                                            <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>
+                                                🗺️ View All
+                                            </Text>
+                                        </TouchableOpacity>
+                                    )}
+                                    <Text style={{ fontSize: 18, color: '#6b7280' }}>
+                                        {showLocationSection ? '▼' : '▶'}
+                                    </Text>
+                                </View>
+                            </TouchableOpacity>
+                            
+                            {showLocationSection && (
+                                <>
+                                    {/* Observation Statistics - moved here */}
+                                    <View style={{ marginBottom: 12 }}>
+                                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#166534', marginBottom: 8 }}>📊 Your Observations</Text>
+                                        <View style={{ 
+                                            backgroundColor: '#fef3c7', 
+                                            padding: 12, 
                                             borderRadius: 6,
-                                        }}
-                                        onPress={() => setShowLocationsView(true)}
-                                    >
-                                        <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>
-                                            🗺️ View All
+                                            borderWidth: 1,
+                                            borderColor: '#fcd34d'
+                                        }}>
+                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                                                <Text style={{ fontSize: 12, fontWeight: '600', color: '#92400e' }}>Total Sightings:</Text>
+                                                <Text style={{ fontSize: 12, color: '#92400e', fontWeight: 'bold' }}>
+                                                    {plantDetail.sightingsCount}
+                                                </Text>
+                                            </View>
+                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                                                <Text style={{ fontSize: 12, fontWeight: '600', color: '#92400e' }}>Photos Taken:</Text>
+                                                <Text style={{ fontSize: 12, color: '#92400e', fontWeight: 'bold' }}>
+                                                    {plantDetail.userPhotos.length}
+                                                </Text>
+                                            </View>
+                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                                                <Text style={{ fontSize: 12, fontWeight: '600', color: '#92400e' }}>First Spotted:</Text>
+                                                <Text style={{ fontSize: 12, color: '#92400e' }}>
+                                                    {new Date(plantDetail.createdAt).toLocaleDateString()}
+                                                </Text>
+                                            </View>
+                                            {plantDetail.lastSeen && (
+                                                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#92400e' }}>Last Seen:</Text>
+                                                    <Text style={{ fontSize: 12, color: '#92400e' }}>
+                                                        {new Date(plantDetail.lastSeen).toLocaleDateString()}
+                                                    </Text>
+                                                </View>
+                                            )}
+                                        </View>
+                                    </View>
+
+                                    {/* Location Details */}
+                                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#166534', marginBottom: 8 }}> Location Details</Text>
+                                    {plantDetail.allSightings.filter((s: any) => s.latitude && s.longitude).slice(0, 2).map((sighting: any, index: number) => (
+                                        <Pressable
+                                            key={index}
+                                            style={{ marginBottom: 8, padding: 10, backgroundColor: 'white', borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0' }}
+                                            onPress={() => {
+                                                if (sighting.latitude && sighting.longitude) {
+                                                    openInMaps(sighting.latitude, sighting.longitude, plantDetail.commonNames?.[0] || plantDetail.scientificName);
+                                                }
+                                            }}
+                                        >
+                                            <Text style={{ fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 4 }}>
+                                                {sighting.address || 'Unknown location'}
+                                            </Text>
+                                            <Text style={{ fontSize: 11, color: '#6b7280', fontFamily: 'monospace' }}>
+                                                {sighting.latitude.toFixed(6)}, {sighting.longitude.toFixed(6)}
+                                            </Text>
+                                            <Text style={{ fontSize: 10, color: '#059669', marginTop: 2, textAlign: 'right' }}>
+                                                🗺️ Tap to open in maps
+                                            </Text>
+                                            <Text style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>
+                                                {new Date(sighting.identifiedAt).toLocaleDateString()}
+                                            </Text>
+                                        </Pressable>
+                                    ))}
+                                    {plantDetail.allSightings.filter((s: any) => s.latitude && s.longitude).length > 2 && (
+                                        <Text style={{ fontSize: 11, color: '#6b7280', textAlign: 'center', fontStyle: 'italic' }}>
+                                            +{plantDetail.allSightings.filter((s: any) => s.latitude && s.longitude).length - 2} more locations
                                         </Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                            {plantDetail.allSightings.filter((s: any) => s.latitude && s.longitude).slice(0, 2).map((sighting: any, index: number) => (
-                                <Pressable
-                                    key={index}
-                                    style={{ marginBottom: 8, padding: 10, backgroundColor: 'white', borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0' }}
-                                    onPress={() => {
-                                        if (sighting.latitude && sighting.longitude) {
-                                            openInMaps(sighting.latitude, sighting.longitude, plantDetail.commonNames?.[0] || plantDetail.scientificName);
-                                        }
-                                    }}
-                                >
-                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 4 }}>
-                                        {sighting.address || 'Unknown location'}
-                                    </Text>
-                                    <Text style={{ fontSize: 11, color: '#6b7280', fontFamily: 'monospace' }}>
-                                        {sighting.latitude.toFixed(6)}, {sighting.longitude.toFixed(6)}
-                                    </Text>
-                                    <Text style={{ fontSize: 10, color: '#059669', marginTop: 2, textAlign: 'right' }}>
-                                        🗺️ Tap to open in maps
-                                    </Text>
-                                    <Text style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>
-                                        {new Date(sighting.identifiedAt).toLocaleDateString()}
-                                    </Text>
-                                </Pressable>
-                            ))}
-                            {plantDetail.allSightings.filter((s: any) => s.latitude && s.longitude).length > 2 && (
-                                <Text style={{ fontSize: 11, color: '#6b7280', textAlign: 'center', fontStyle: 'italic' }}>
-                                    +{plantDetail.allSightings.filter((s: any) => s.latitude && s.longitude).length - 2} more locations
-                                </Text>
+                                    )}
+                                </>
                             )}
                         </View>
                     )}
@@ -980,9 +832,223 @@ export default function PlantDetailView({
                             </Text>
                         )}
 
-                        {/* Traditional Usage Information */}
+
+                        
+                        {/* Plant Classification */}
+                        <View style={{ marginBottom: 8 }}>
+                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>🔬 Classification</Text>
+                            <View style={{ 
+                                backgroundColor: '#f0fdf4', 
+                                padding: 12, 
+                                borderRadius: 6,
+                                borderWidth: 1,
+                                borderColor: '#bbf7d0'
+                            }}>
+                                <View style={{ flexDirection: 'row', marginBottom: 4 }}>
+                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534', width: 80 }}>Scientific:</Text>
+                                    <Text selectable style={{ fontSize: 12, color: '#374151', flex: 1, fontStyle: 'italic' }}>
+                                        {plantDetail.scientificName}
+                                    </Text>
+                                </View>
+                                {plantDetail.commonNames && plantDetail.commonNames.length > 0 && (
+                                    <View style={{ flexDirection: 'row', marginBottom: 4 }}>
+                                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534', width: 80 }}>Common:</Text>
+                                        <Text selectable style={{ fontSize: 12, color: '#374151', flex: 1 }}>
+                                            {plantDetail.commonNames.join(', ')}
+                                        </Text>
+                                    </View>
+                                )}
+                                <View style={{ flexDirection: 'row', marginBottom: 4 }}>
+                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534', width: 80 }}>Genus:</Text>
+                                    <Text selectable style={{ fontSize: 12, color: '#374151', flex: 1 }}>
+                                        {plantDetail.scientificName.split(' ')[0]}
+                                    </Text>
+                                </View>
+                                <View style={{ flexDirection: 'row' }}>
+                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534', width: 80 }}>Species:</Text>
+                                    <Text selectable style={{ fontSize: 12, color: '#374151', flex: 1 }}>
+                                        {plantDetail.scientificName.split(' ').slice(1).join(' ') || 'N/A'}
+                                    </Text>
+                                </View>
+                            </View>
+                        </View>
+
+
+                        
+                        {/* Chat with Taita Button */}
+                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                            <TouchableOpacity 
+                                style={{ 
+                                    flex: 1,
+                                    padding: 12, 
+                                    backgroundColor: '#7c3aed', 
+                                    borderRadius: 8, 
+                                    alignItems: 'center',
+                                    shadowColor: '#000',
+                                    shadowOffset: { width: 0, height: 2 },
+                                    shadowOpacity: 0.1,
+                                    shadowRadius: 4,
+                                    elevation: 3,
+                                }}
+                                onPress={() => setShowChatView(true)}
+                            >
+                                <Text style={{ color: 'white', fontSize: 14, fontWeight: '600', marginBottom: 2 }}>
+                                    🌿 Chat with Taita
+                                </Text>
+                                <Text style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: 10 }}>
+                                    Ask about traditional uses & wisdom
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+
+                    {/* Enhanced Community Knowledge Section */}
+                    <View style={{ marginBottom: 16, padding: 14, backgroundColor: '#f0f9ff', borderRadius: 10, borderWidth: 1, borderColor: '#0ea5e9' }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#0c4a6e' }}>🌍 Community Knowledge</Text>
+                        </View>
+                        
+                        {/* Community Stats */}
+                        <View style={{ 
+                            backgroundColor: 'white', 
+                            padding: 10, 
+                            borderRadius: 8, 
+                            marginBottom: 12,
+                            borderWidth: 1,
+                            borderColor: '#0ea5e9'
+                        }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                                <View style={{ alignItems: 'center', flex: 1 }}>
+                                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#0ea5e9' }}>
+                                        {plantDetail.allSightings?.length || 0}
+                                    </Text>
+                                    <Text style={{ fontSize: 10, color: '#6b7280', textAlign: 'center' }}>
+                                        Sightings
+                                    </Text>
+                                </View>
+                                <View style={{ alignItems: 'center', flex: 1 }}>
+                                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#0ea5e9' }}>
+                                        {plantDetail.userPhotos?.length || 0}
+                                    </Text>
+                                    <Text style={{ fontSize: 10, color: '#6b7280', textAlign: 'center' }}>
+                                        Photos
+                                    </Text>
+                                </View>
+                                <View style={{ alignItems: 'center', flex: 1 }}>
+                                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#0ea5e9' }}>
+                                        {plantFeedback?.length || 0}
+                                    </Text>
+                                    <Text style={{ fontSize: 10, color: '#6b7280', textAlign: 'center' }}>
+                                        Tips Shared
+                                    </Text>
+                                </View>
+                            </View>
+                        </View>
+
+                        {/* Share Knowledge Button */}
+                        <TouchableOpacity
+                            style={{
+                                backgroundColor: '#0ea5e9',
+                                paddingVertical: 10,
+                                paddingHorizontal: 16,
+                                borderRadius: 8,
+                                alignItems: 'center',
+                                marginBottom: 12
+                            }}
+                            onPress={() => {
+                                Alert.prompt(
+                                    'Share Your Knowledge',
+                                    'What have you learned about this plant? Share traditional uses, preparation methods, or personal experiences.',
+                                    [
+                                        { text: 'Cancel', style: 'cancel' },
+                                        {
+                                            text: 'Share',
+                                            onPress: async (text) => {
+                                                if (text && text.trim()) {
+                                                    try {
+                                                        await addPlantFeedback({
+                                                            plantId: selectedPlantId as any,
+                                                            scientificName: plantDetail.scientificName,
+                                                            feedback: text.trim(),
+                                                            timestamp: Date.now()
+                                                        });
+                                                        Alert.alert('Thank You!', 'Your knowledge has been shared with the community.');
+                                                    } catch (error) {
+                                                        Alert.alert('Error', 'Failed to share your knowledge. Please try again.');
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    ],
+                                    'plain-text'
+                                );
+                            }}
+                        >
+                            <Text style={{ color: 'white', fontWeight: '600', fontSize: 13 }}>
+                                💬 Share Your Knowledge
+                            </Text>
+                        </TouchableOpacity>
+
+                        {/* Community Tips */}
+                        {plantFeedback && plantFeedback.length > 0 && (
+                            <View>
+                                <Text style={{ fontSize: 12, color: '#0369a1', marginBottom: 6 }}>
+                                    💡 Recent Community Tips:
+                                </Text>
+                                {plantFeedback.slice(0, 2).map((feedback, index) => (
+                                    <View 
+                                        key={feedback._id} 
+                                        style={{ 
+                                            backgroundColor: 'white', 
+                                            padding: 8, 
+                                            borderRadius: 6, 
+                                            borderWidth: 1, 
+                                            borderColor: '#0ea5e9',
+                                            marginBottom: 6
+                                        }}
+                                    >
+                                        <Text style={{ fontSize: 11, color: '#374151', fontStyle: 'italic' }}>
+                                            "{feedback.feedback}"
+                                        </Text>
+                                        <Text style={{ fontSize: 9, color: '#6b7280', marginTop: 4 }}>
+                                            — Community member, {new Date(feedback.timestamp).toLocaleDateString()}
+                                        </Text>
+                                    </View>
+                                ))}
+                                {plantFeedback.length > 2 && (
+                                    <Text style={{ fontSize: 10, color: '#0ea5e9', textAlign: 'center', fontStyle: 'italic' }}>
+                                        +{plantFeedback.length - 2} more tips from the community
+                                    </Text>
+                                )}
+                            </View>
+                        )}
+                    </View>
+
+                    {/* Enhanced Medicinal Knowledge Section */}
+                    <View style={{ marginBottom: 16, padding: 16, backgroundColor: '#f0fdf4', borderRadius: 12, borderWidth: 1, borderColor: '#bbf7d0' }}>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#166534', marginBottom: 12 }}>
+                            🌿 Traditional Medicinal Knowledge
+                        </Text>
+                        
+                        <TouchableOpacity
+                            style={{
+                                backgroundColor: '#059669',
+                                paddingHorizontal: 16,
+                                paddingVertical: 10,
+                                borderRadius: 8,
+                                alignItems: 'center',
+                                marginBottom: 16
+                            }}
+                            onPress={() => setShowMedicinalQAModal(true)}
+                        >
+                            <Text style={{ color: 'white', fontSize: 14, fontWeight: '600' }}>
+                                💬 Ask Questions About This Plant
+                            </Text>
+                        </TouchableOpacity>
+
+                        {/* Traditional Usage Information - MOVED HERE */}
                         {plantDetail.traditionalUsage && plantDetail.traditionalUsage.trim() && (
-                            <View style={{ marginBottom: 8 }}>
+                            <View style={{ marginBottom: 16 }}>
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                                     <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534' }}>📚 Traditional Uses & Preparation</Text>
                                     <TouchableOpacity
@@ -1179,86 +1245,85 @@ export default function PlantDetailView({
                                 </View>
                             </View>
                         )}
-                        
-                        {/* Plant Classification */}
-                        <View style={{ marginBottom: 8 }}>
-                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>🔬 Classification</Text>
-                            <View style={{ 
-                                backgroundColor: '#f0fdf4', 
-                                padding: 12, 
-                                borderRadius: 6,
-                                borderWidth: 1,
-                                borderColor: '#bbf7d0'
-                            }}>
-                                <View style={{ flexDirection: 'row', marginBottom: 4 }}>
-                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534', width: 80 }}>Scientific:</Text>
-                                    <Text selectable style={{ fontSize: 12, color: '#374151', flex: 1, fontStyle: 'italic' }}>
-                                        {plantDetail.scientificName}
-                                    </Text>
-                                </View>
-                                {plantDetail.commonNames && plantDetail.commonNames.length > 0 && (
-                                    <View style={{ flexDirection: 'row', marginBottom: 4 }}>
-                                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534', width: 80 }}>Common:</Text>
-                                        <Text selectable style={{ fontSize: 12, color: '#374151', flex: 1 }}>
-                                            {plantDetail.commonNames.join(', ')}
-                                        </Text>
-                                    </View>
-                                )}
-                                <View style={{ flexDirection: 'row', marginBottom: 4 }}>
-                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534', width: 80 }}>Genus:</Text>
-                                    <Text selectable style={{ fontSize: 12, color: '#374151', flex: 1 }}>
-                                        {plantDetail.scientificName.split(' ')[0]}
-                                    </Text>
-                                </View>
-                                <View style={{ flexDirection: 'row' }}>
-                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534', width: 80 }}>Species:</Text>
-                                    <Text selectable style={{ fontSize: 12, color: '#374151', flex: 1 }}>
-                                        {plantDetail.scientificName.split(' ').slice(1).join(' ') || 'N/A'}
-                                    </Text>
+
+                        {/* Medicinal Properties */}
+                        {plantDetail.medicinalTags && plantDetail.medicinalTags.length > 0 && (
+                            <View style={{ marginBottom: 16, padding: 12, backgroundColor: 'white', borderRadius: 8, borderWidth: 1, borderColor: '#bbf7d0' }}>
+                                <Text style={{ fontSize: 14, fontWeight: '600', color: '#166534', marginBottom: 8 }}>
+                                    💊 Medicinal Properties
+                                </Text>
+                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                                    {plantDetail.medicinalTags.map((tag: string, index: number) => (
+                                        <View 
+                                            key={index}
+                                            style={{ 
+                                                backgroundColor: '#dcfce7', 
+                                                paddingHorizontal: 8, 
+                                                paddingVertical: 4, 
+                                                borderRadius: 12,
+                                                borderWidth: 1,
+                                                borderColor: '#16a34a'
+                                            }}
+                                        >
+                                            <Text style={{ fontSize: 12, color: '#166534', fontWeight: '500' }}>
+                                                {tag}
+                                            </Text>
+                                        </View>
+                                    ))}
                                 </View>
                             </View>
-                        </View>
+                        )}
 
-                        {/* Observation Statistics */}
-                        <View style={{ marginBottom: 8 }}>
-                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>📊 Your Observations</Text>
-                            <View style={{ 
-                                backgroundColor: '#fef3c7', 
-                                padding: 12, 
-                                borderRadius: 6,
-                                borderWidth: 1,
-                                borderColor: '#fcd34d'
-                            }}>
-                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#92400e' }}>Total Sightings:</Text>
-                                    <Text style={{ fontSize: 12, color: '#92400e', fontWeight: 'bold' }}>
-                                        {plantDetail.sightingsCount}
-                                    </Text>
-                                </View>
-                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#92400e' }}>Photos Taken:</Text>
-                                    <Text style={{ fontSize: 12, color: '#92400e', fontWeight: 'bold' }}>
-                                        {plantDetail.userPhotos.length}
-                                    </Text>
-                                </View>
-                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#92400e' }}>First Spotted:</Text>
-                                    <Text style={{ fontSize: 12, color: '#92400e' }}>
-                                        {new Date(plantDetail.createdAt).toLocaleDateString()}
-                                    </Text>
-                                </View>
-                                {plantDetail.lastSeen && (
-                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#92400e' }}>Last Seen:</Text>
-                                        <Text style={{ fontSize: 12, color: '#92400e' }}>
-                                            {new Date(plantDetail.lastSeen).toLocaleDateString()}
-                                        </Text>
-                                    </View>
-                                )}
+                        {/* User's Medicinal Observations */}
+                        {plantDetail.allSightings && plantDetail.allSightings.some((s: any) => s.medicinalUses || s.preparationMethods || s.partsUsed || s.dosageNotes || s.sourceAttribution || s.userExperience) && (
+                            <View style={{ marginBottom: 16, padding: 12, backgroundColor: 'white', borderRadius: 8, borderWidth: 1, borderColor: '#bbf7d0' }}>
+                                <Text style={{ fontSize: 14, fontWeight: '600', color: '#166534', marginBottom: 12 }}>
+                                    📝 Your Medicinal Observations
+                                </Text>
+                                {plantDetail.allSightings.map((sighting: any, index: number) => (
+                                    (sighting.medicinalUses || sighting.preparationMethods || sighting.partsUsed || sighting.dosageNotes || sighting.sourceAttribution || sighting.userExperience) && (
+                                        <View key={index} style={{ marginBottom: 12, padding: 10, backgroundColor: '#f8fafc', borderRadius: 6, borderWidth: 1, borderColor: '#e2e8f0' }}>
+                                            <Text style={{ fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 6 }}>
+                                                Observation #{index + 1} - {new Date(sighting.identifiedAt).toLocaleDateString()}
+                                            </Text>
+                                            <PlantMedicinalDetailsView
+                                                details={{
+                                                    medicinalUses: sighting.medicinalUses || [],
+                                                    preparationMethods: sighting.preparationMethods || [],
+                                                    partsUsed: sighting.partsUsed || [],
+                                                    dosageNotes: sighting.dosageNotes || '',
+                                                    sourceAttribution: sighting.sourceAttribution || '',
+                                                    userExperience: sighting.userExperience || '',
+                                                }}
+                                                showEditButton={false}
+                                            />
+                                        </View>
+                                    )
+                                ))}
                             </View>
-                        </View>
+                        )}
 
-                        {/* User Notes & Feedback Section */}
+                        {/* Add New Medicinal Observation Button */}
+                        <TouchableOpacity
+                            style={{
+                                backgroundColor: '#059669',
+                                paddingVertical: 12,
+                                paddingHorizontal: 16,
+                                borderRadius: 8,
+                                alignItems: 'center',
+                                marginTop: 8
+                            }}
+                            onPress={() => {
+                                console.log('Opening medicinal details modal');
+                                setShowMedicinalDetailsModal(true);
+                            }}
+                        >
+                            <Text style={{ color: 'white', fontSize: 14, fontWeight: '600' }}>
+                                ➕ Add Medicinal Observation
+                            </Text>
+                        </TouchableOpacity>
+
+                                                {/* User Notes & Feedback Section */}
                         <View style={{ marginBottom: 16, padding: 16, backgroundColor: '#f0fdf4', borderRadius: 12, borderWidth: 1, borderColor: '#bbf7d0' }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, justifyContent: 'space-between' }}>
                                 <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534' }}>📝 User Notes & Corrections</Text>
@@ -1418,403 +1483,8 @@ export default function PlantDetailView({
                                 </Text>
                             )}
                         </View>
-                        
-                        <Text style={{ fontSize: 12, color: '#6b7280' }}>
-                            🔍 Spotted {plantDetail.sightingsCount} time{plantDetail.sightingsCount !== 1 ? 's' : ''}
-                            {plantDetail.lastSeen && ` • Last seen ${new Date(plantDetail.lastSeen).toLocaleDateString()}`}
-                        </Text>
-                        
-                        {/* Copy instructions */}
-                        <View style={{ marginTop: 8, padding: 8, backgroundColor: '#f0fdf4', borderRadius: 6 }}>
-                            <Text style={{ fontSize: 10, color: '#059669', textAlign: 'center' }}>
-                                💡 Press and hold any text above to select and copy plant information
-                            </Text>
-                        </View>
-                        
-                        {/* Quick Copy Button */}
-                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                            <TouchableOpacity 
-                                style={{ 
-                                    flex: 1,
-                                    padding: 10, 
-                                    backgroundColor: '#059669', 
-                                    borderRadius: 6, 
-                                    alignItems: 'center' 
-                                }}
-                                onPress={() => copyPlantInfo(plantDetail)}
-                            >
-                                <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>
-                                    📋 Copy Info
-                                </Text>
-                            </TouchableOpacity>
-                            
-                            <TouchableOpacity 
-                                style={{ 
-                                    flex: 1,
-                                    padding: 10, 
-                                    backgroundColor: '#0ea5e9', 
-                                    borderRadius: 6, 
-                                    alignItems: 'center' 
-                                }}
-                                onPress={() => setShowSharingOptions(true)}
-                            >
-                                <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>
-                                    🌐 Share Plant
-                                </Text>
-                            </TouchableOpacity>
-                            
-                            <TouchableOpacity 
-                                style={{ 
-                                    flex: 1,
-                                    padding: 10, 
-                                    backgroundColor: '#f59e0b', 
-                                    borderRadius: 6, 
-                                    alignItems: 'center' 
-                                }}
-                                onPress={() => setShowCommunityModal(true)}
-                            >
-                                <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>
-                                    💡 Add Tip
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                        
-                        {/* Chat with Taita Button */}
-                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                            <TouchableOpacity 
-                                style={{ 
-                                    flex: 1,
-                                    padding: 12, 
-                                    backgroundColor: '#7c3aed', 
-                                    borderRadius: 8, 
-                                    alignItems: 'center',
-                                    shadowColor: '#000',
-                                    shadowOffset: { width: 0, height: 2 },
-                                    shadowOpacity: 0.1,
-                                    shadowRadius: 4,
-                                    elevation: 3,
-                                }}
-                                onPress={() => setShowChatView(true)}
-                            >
-                                <Text style={{ color: 'white', fontSize: 14, fontWeight: '600', marginBottom: 2 }}>
-                                    🌿 Chat with Taita
-                                </Text>
-                                <Text style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: 10 }}>
-                                    Ask about traditional uses & wisdom
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
                     </View>
 
-                    {/* Enhanced Community Knowledge Section */}
-                    <View style={{ marginBottom: 16, padding: 14, backgroundColor: '#f0f9ff', borderRadius: 10, borderWidth: 1, borderColor: '#0ea5e9' }}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#0c4a6e' }}>🌍 Community Knowledge</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                <Text style={{ fontSize: 12, color: '#0369a1', marginRight: 8 }}>
-                                    ⭐ {plantRating > 0 ? `${plantRating}/5` : 'Rate this plant'}
-                                </Text>
-                            </View>
-                        </View>
-                        
-                        {/* Community Stats */}
-                        <View style={{ 
-                            backgroundColor: 'white', 
-                            padding: 10, 
-                            borderRadius: 8, 
-                            marginBottom: 12,
-                            borderWidth: 1,
-                            borderColor: '#0ea5e9'
-                        }}>
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                                <View style={{ alignItems: 'center', flex: 1 }}>
-                                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#0ea5e9' }}>
-                                        {plantDetail.allSightings?.length || 0}
-                                    </Text>
-                                    <Text style={{ fontSize: 10, color: '#6b7280', textAlign: 'center' }}>
-                                        Sightings
-                                    </Text>
-                                </View>
-                                <View style={{ alignItems: 'center', flex: 1 }}>
-                                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#0ea5e9' }}>
-                                        {plantDetail.userPhotos?.length || 0}
-                                    </Text>
-                                    <Text style={{ fontSize: 10, color: '#6b7280', textAlign: 'center' }}>
-                                        Photos
-                                    </Text>
-                                </View>
-                                <View style={{ alignItems: 'center', flex: 1 }}>
-                                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#0ea5e9' }}>
-                                        {plantFeedback?.length || 0}
-                                    </Text>
-                                    <Text style={{ fontSize: 10, color: '#6b7280', textAlign: 'center' }}>
-                                        Tips Shared
-                                    </Text>
-                                </View>
-                            </View>
-                        </View>
-                        
-                        {/* Plant Rating */}
-                        <View style={{ marginBottom: 12 }}>
-                            <Text style={{ fontSize: 12, color: '#0369a1', marginBottom: 6 }}>
-                                How useful is this plant for you?
-                            </Text>
-                            <View style={{ flexDirection: 'row', gap: 4 }}>
-                                {[1, 2, 3, 4, 5].map((star) => (
-                                    <TouchableOpacity
-                                        key={star}
-                                        onPress={() => setPlantRating(star)}
-                                        style={{ padding: 2 }}
-                                    >
-                                        <Text style={{ fontSize: 20, color: star <= plantRating ? '#f59e0b' : '#e5e7eb' }}>
-                                            {star <= plantRating ? '★' : '☆'}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                        </View>
-
-                        {/* Share Knowledge Button */}
-                        <TouchableOpacity
-                            style={{
-                                backgroundColor: '#0ea5e9',
-                                paddingVertical: 10,
-                                paddingHorizontal: 16,
-                                borderRadius: 8,
-                                alignItems: 'center',
-                                marginBottom: 12
-                            }}
-                            onPress={() => {
-                                Alert.prompt(
-                                    'Share Your Knowledge',
-                                    'What have you learned about this plant? Share traditional uses, preparation methods, or personal experiences.',
-                                    [
-                                        { text: 'Cancel', style: 'cancel' },
-                                        {
-                                            text: 'Share',
-                                            onPress: async (text) => {
-                                                if (text && text.trim()) {
-                                                    try {
-                                                        await addPlantFeedback({
-                                                            plantId: selectedPlantId as any,
-                                                            scientificName: plantDetail.scientificName,
-                                                            feedback: text.trim(),
-                                                            timestamp: Date.now()
-                                                        });
-                                                        Alert.alert('Thank You!', 'Your knowledge has been shared with the community.');
-                                                    } catch (error) {
-                                                        Alert.alert('Error', 'Failed to share your knowledge. Please try again.');
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    ],
-                                    'plain-text'
-                                );
-                            }}
-                        >
-                            <Text style={{ color: 'white', fontWeight: '600', fontSize: 13 }}>
-                                💬 Share Your Knowledge
-                            </Text>
-                        </TouchableOpacity>
-
-                        {/* Community Tips */}
-                        {plantFeedback && plantFeedback.length > 0 && (
-                            <View>
-                                <Text style={{ fontSize: 12, color: '#0369a1', marginBottom: 6 }}>
-                                    💡 Recent Community Tips:
-                                </Text>
-                                {plantFeedback.slice(0, 2).map((feedback, index) => (
-                                    <View 
-                                        key={feedback._id} 
-                                        style={{ 
-                                            backgroundColor: 'white', 
-                                            padding: 8, 
-                                            borderRadius: 6, 
-                                            borderWidth: 1, 
-                                            borderColor: '#0ea5e9',
-                                            marginBottom: 6
-                                        }}
-                                    >
-                                        <Text style={{ fontSize: 11, color: '#374151', fontStyle: 'italic' }}>
-                                            "{feedback.feedback}"
-                                        </Text>
-                                        <Text style={{ fontSize: 9, color: '#6b7280', marginTop: 4 }}>
-                                            — Community member, {new Date(feedback.timestamp).toLocaleDateString()}
-                                        </Text>
-                                    </View>
-                                ))}
-                                {plantFeedback.length > 2 && (
-                                    <Text style={{ fontSize: 10, color: '#0ea5e9', textAlign: 'center', fontStyle: 'italic' }}>
-                                        +{plantFeedback.length - 2} more tips from the community
-                                    </Text>
-                                )}
-                            </View>
-                        )}
-                    </View>
-
-
-
-                    {/* Enhanced Medicinal Knowledge Section */}
-                    <View style={{ marginBottom: 16, padding: 16, backgroundColor: '#f0fdf4', borderRadius: 12, borderWidth: 1, borderColor: '#bbf7d0' }}>
-                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#166534', marginBottom: 12 }}>
-                            🌿 Traditional Medicinal Knowledge
-                        </Text>
-                        
-                        <TouchableOpacity
-                            style={{
-                                backgroundColor: '#059669',
-                                paddingHorizontal: 16,
-                                paddingVertical: 10,
-                                borderRadius: 8,
-                                alignItems: 'center',
-                                marginBottom: 16
-                            }}
-                            onPress={() => setShowMedicinalQAModal(true)}
-                        >
-                            <Text style={{ color: 'white', fontSize: 14, fontWeight: '600' }}>
-                                💬 Ask Questions About This Plant
-                            </Text>
-                        </TouchableOpacity>
-
-                        {/* Plant's Traditional Usage */}
-                        {plantDetail.traditionalUsage && (
-                            <View style={{ marginBottom: 16, padding: 12, backgroundColor: 'white', borderRadius: 8, borderWidth: 1, borderColor: '#bbf7d0' }}>
-                                <Text style={{ fontSize: 14, fontWeight: '600', color: '#166534', marginBottom: 8 }}>
-                                    📚 Traditional Uses
-                                </Text>
-                                <Text style={{ fontSize: 13, color: '#374151', lineHeight: 18 }}>
-                                    {plantDetail.traditionalUsage}
-                                </Text>
-                            </View>
-                        )}
-
-                        {/* Medicinal Properties */}
-                        {plantDetail.medicinalTags && plantDetail.medicinalTags.length > 0 && (
-                            <View style={{ marginBottom: 16, padding: 12, backgroundColor: 'white', borderRadius: 8, borderWidth: 1, borderColor: '#bbf7d0' }}>
-                                <Text style={{ fontSize: 14, fontWeight: '600', color: '#166534', marginBottom: 8 }}>
-                                    💊 Medicinal Properties
-                                </Text>
-                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                                    {plantDetail.medicinalTags.map((tag: string, index: number) => (
-                                        <View 
-                                            key={index}
-                                            style={{ 
-                                                backgroundColor: '#dcfce7', 
-                                                paddingHorizontal: 8, 
-                                                paddingVertical: 4, 
-                                                borderRadius: 12,
-                                                borderWidth: 1,
-                                                borderColor: '#16a34a'
-                                            }}
-                                        >
-                                            <Text style={{ fontSize: 12, color: '#166534', fontWeight: '500' }}>
-                                                {tag}
-                                            </Text>
-                                        </View>
-                                    ))}
-                                </View>
-                            </View>
-                        )}
-
-                        {/* User's Medicinal Observations */}
-                        {plantDetail.allSightings && plantDetail.allSightings.some((s: any) => s.medicinalUses || s.preparationMethods || s.partsUsed || s.dosageNotes || s.sourceAttribution || s.userExperience) && (
-                            <View style={{ marginBottom: 16, padding: 12, backgroundColor: 'white', borderRadius: 8, borderWidth: 1, borderColor: '#bbf7d0' }}>
-                                <Text style={{ fontSize: 14, fontWeight: '600', color: '#166534', marginBottom: 12 }}>
-                                    📝 Your Medicinal Observations
-                                </Text>
-                                {plantDetail.allSightings.map((sighting: any, index: number) => (
-                                    (sighting.medicinalUses || sighting.preparationMethods || sighting.partsUsed || sighting.dosageNotes || sighting.sourceAttribution || sighting.userExperience) && (
-                                        <View key={index} style={{ marginBottom: 12, padding: 10, backgroundColor: '#f8fafc', borderRadius: 6, borderWidth: 1, borderColor: '#e2e8f0' }}>
-                                            <Text style={{ fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 6 }}>
-                                                Observation #{index + 1} - {new Date(sighting.identifiedAt).toLocaleDateString()}
-                                            </Text>
-                                            <PlantMedicinalDetailsView
-                                                details={{
-                                                    medicinalUses: sighting.medicinalUses || [],
-                                                    preparationMethods: sighting.preparationMethods || [],
-                                                    partsUsed: sighting.partsUsed || [],
-                                                    dosageNotes: sighting.dosageNotes || '',
-                                                    sourceAttribution: sighting.sourceAttribution || '',
-                                                    userExperience: sighting.userExperience || '',
-                                                }}
-                                                showEditButton={false}
-                                            />
-                                        </View>
-                                    )
-                                ))}
-                            </View>
-                        )}
-
-                        {/* Add New Medicinal Observation Button */}
-                        <TouchableOpacity
-                            style={{
-                                backgroundColor: '#059669',
-                                paddingVertical: 12,
-                                paddingHorizontal: 16,
-                                borderRadius: 8,
-                                alignItems: 'center',
-                                marginTop: 8
-                            }}
-                            onPress={() => {
-                                console.log('Opening medicinal details modal');
-                                setShowMedicinalDetailsModal(true);
-                            }}
-                        >
-                            <Text style={{ color: 'white', fontSize: 14, fontWeight: '600' }}>
-                                ➕ Add Medicinal Observation
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-
-                    {/* Growing Conditions, Season Info, Companion Plants, More Details */}
-                    <View style={{ marginBottom: 16, padding: 14, backgroundColor: '#f0fdf4', borderRadius: 10, borderWidth: 1, borderColor: '#bbf7d0' }}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534' }}>🌱 Growing Conditions</Text>
-                            <TouchableOpacity
-                                onPress={refreshPlantData}
-                                style={{ padding: 4 }}
-                                disabled={loading}
-                            >
-                                {loading ? (
-                                    <ActivityIndicator size="small" color="#059669" />
-                                ) : (
-                                    <Text style={{ color: '#059669', fontSize: 12 }}>🔄 Refresh</Text>
-                                )}
-                            </TouchableOpacity>
-                        </View>
-                        <Text style={{ fontSize: 13, color: '#374151', marginBottom: 10 }}>
-                            {plantDetail.growingConditions || 'No growing conditions data available yet.'}
-                        </Text>
-                        <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>🗓️ Season Info</Text>
-
-
-                        <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 8 }}>🔎 More Details</Text>
-                        {plantDetail.moreDetails ? (
-                            <View style={{ 
-                                backgroundColor: '#f0fdf4', 
-                                padding: 12, 
-                                borderRadius: 8,
-                                borderWidth: 1,
-                                borderColor: '#bbf7d0'
-                            }}>
-                                <Markdown style={{
-                                    body: { fontSize: 13, color: '#374151', lineHeight: 18 },
-                                    heading1: { fontSize: 14, fontWeight: 'bold', color: '#166534', marginBottom: 4 },
-                                    heading2: { fontSize: 13, fontWeight: 'bold', color: '#166534', marginBottom: 3 },
-                                    strong: { fontWeight: 'bold', color: '#166534' },
-                                    list_item: { fontSize: 13, color: '#374151', marginBottom: 2 },
-                                    paragraph: { fontSize: 13, color: '#374151', marginBottom: 4 }
-                                }}>
-                                    {plantDetail.moreDetails}
-                                </Markdown>
-                            </View>
-                        ) : (
-                            <Text style={{ fontSize: 13, color: '#374151' }}>
-                                No additional details available yet.
-                            </Text>
-                        )}
-                    </View>
 
                     {/* Wikipedia Link */}
                     {plantDetail.wikiUrl && (
@@ -2109,323 +1779,6 @@ export default function PlantDetailView({
                 onLocationSelected={handleLocationSelected}
                 currentLocation={currentLocation}
             />
-
-
-
-            {/* Community Features Modal */}
-            <Modal
-                visible={showCommunityModal}
-                transparent={true}
-                animationType="slide"
-                onRequestClose={() => setShowCommunityModal(false)}
-            >
-                <View style={{
-                    flex: 1,
-                    backgroundColor: 'rgba(0,0,0,0.5)',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    padding: 20
-                }}>
-                    <View style={{
-                        backgroundColor: 'white',
-                        borderRadius: 16,
-                        padding: 24,
-                        width: '100%',
-                        maxWidth: 400,
-                        maxHeight: '90%'
-                    }}>
-                        <View style={{ alignItems: 'center', marginBottom: 20 }}>
-                            <Text style={{ fontSize: 24, marginBottom: 8 }}>👥</Text>
-                            <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#374151', textAlign: 'center' }}>
-                                Community Features
-                            </Text>
-                        </View>
-
-                        <ScrollView showsVerticalScrollIndicator={false}>
-                            {/* Plant Rating */}
-                            <View style={{ marginBottom: 20 }}>
-                                <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 8 }}>
-                                    ⭐ Rate this Plant:
-                                </Text>
-                                <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
-                                    {[1, 2, 3, 4, 5].map((star) => (
-                                        <TouchableOpacity
-                                            key={star}
-                                            onPress={() => setPlantRating(star)}
-                                        >
-                                            <Text style={{ fontSize: 24 }}>
-                                                {star <= plantRating ? '⭐' : '☆'}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
-                                {plantRating > 0 && (
-                                    <Text style={{ fontSize: 12, color: '#6b7280', textAlign: 'center', marginTop: 4 }}>
-                                        You rated this plant {plantRating}/5 stars
-                                    </Text>
-                                )}
-                            </View>
-
-                            {/* Share Experience */}
-                            <View style={{ marginBottom: 20 }}>
-                                <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 8 }}>
-                                    💬 Share Your Experience:
-                                </Text>
-                                <TextInput
-                                    style={{
-                                        borderWidth: 1,
-                                        borderColor: '#d1d5db',
-                                        borderRadius: 8,
-                                        padding: 12,
-                                        fontSize: 14,
-                                        minHeight: 80,
-                                        textAlignVertical: 'top'
-                                    }}
-                                    placeholder="Share tips, experiences, or questions about this plant..."
-                                    value={userExperience}
-                                    onChangeText={setUserExperience}
-                                    multiline
-                                />
-                            </View>
-
-                            {/* Community Tip */}
-                            <View style={{ marginBottom: 20 }}>
-                                <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 8 }}>
-                                    💡 Add Community Tip:
-                                </Text>
-                                <TextInput
-                                    style={{
-                                        borderWidth: 1,
-                                        borderColor: '#d1d5db',
-                                        borderRadius: 8,
-                                        padding: 12,
-                                        fontSize: 14,
-                                        minHeight: 60,
-                                        textAlignVertical: 'top'
-                                    }}
-                                    placeholder="Share a helpful tip for other users..."
-                                    value={communityTip}
-                                    onChangeText={setCommunityTip}
-                                    multiline
-                                />
-                            </View>
-
-                            {/* Sharing Options */}
-                            <View style={{ marginBottom: 20 }}>
-                                <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 8 }}>
-                                    📤 Share Plant:
-                                </Text>
-                                <View style={{ flexDirection: 'row', gap: 8 }}>
-                                    <TouchableOpacity
-                                        style={{
-                                            flex: 1,
-                                            backgroundColor: '#0ea5e9',
-                                            padding: 12,
-                                            borderRadius: 8,
-                                            alignItems: 'center'
-                                        }}
-                                        onPress={() => {
-                                            const shareText = `Check out this amazing plant: ${plantDetail.commonNames?.[0] || plantDetail.scientificName} (${plantDetail.scientificName})`;
-                                            Clipboard.setString(shareText);
-                                            Alert.alert('Shared!', 'Plant information copied to clipboard.');
-                                        }}
-                                    >
-                                        <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>
-                                            📋 Copy Info
-                                        </Text>
-                                    </TouchableOpacity>
-                                    
-                                    <TouchableOpacity
-                                        style={{
-                                            flex: 1,
-                                            backgroundColor: '#059669',
-                                            padding: 12,
-                                            borderRadius: 8,
-                                            alignItems: 'center'
-                                        }}
-                                        onPress={() => {
-                                            setShowSharingOptions(true);
-                                        }}
-                                    >
-                                        <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>
-                                            📤 More Options
-                                        </Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-                        </ScrollView>
-
-                        {/* Action Buttons */}
-                        <View style={{ flexDirection: 'row', gap: 12 }}>
-                            <TouchableOpacity
-                                style={{
-                                    flex: 1,
-                                    padding: 12,
-                                    backgroundColor: '#6b7280',
-                                    borderRadius: 8,
-                                    alignItems: 'center'
-                                }}
-                                onPress={() => setShowCommunityModal(false)}
-                            >
-                                <Text style={{ color: 'white', fontWeight: '600' }}>
-                                    Cancel
-                                </Text>
-                            </TouchableOpacity>
-                            
-                            <TouchableOpacity
-                                style={{
-                                    flex: 1,
-                                    padding: 12,
-                                    backgroundColor: '#059669',
-                                    borderRadius: 8,
-                                    alignItems: 'center'
-                                }}
-                                onPress={() => {
-                                    // Save community data
-                                    setShowCommunityModal(false);
-                                    Alert.alert('Shared!', 'Your community contribution has been saved.');
-                                }}
-                            >
-                                <Text style={{ color: 'white', fontWeight: '600' }}>
-                                    Share
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* Sharing Options Modal */}
-            <Modal
-                visible={showSharingOptions}
-                transparent={true}
-                animationType="slide"
-                onRequestClose={() => setShowSharingOptions(false)}
-            >
-                <View style={{
-                    flex: 1,
-                    backgroundColor: 'rgba(0,0,0,0.5)',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    padding: 20
-                }}>
-                    <View style={{
-                        backgroundColor: 'white',
-                        borderRadius: 16,
-                        padding: 24,
-                        width: '100%',
-                        maxWidth: 350
-                    }}>
-                        <View style={{ alignItems: 'center', marginBottom: 20 }}>
-                            <Text style={{ fontSize: 24, marginBottom: 8 }}>📤</Text>
-                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#374151', textAlign: 'center' }}>
-                                Share Plant
-                            </Text>
-                        </View>
-
-                        <View style={{ gap: 12 }}>
-                            <TouchableOpacity
-                                style={{
-                                    flexDirection: 'row',
-                                    alignItems: 'center',
-                                    padding: 16,
-                                    backgroundColor: '#f8fafc',
-                                    borderRadius: 8,
-                                    borderWidth: 1,
-                                    borderColor: '#e2e8f0'
-                                }}
-                                onPress={() => {
-                                    const shareText = `🌿 ${plantDetail.commonNames?.[0] || plantDetail.scientificName}\nScientific Name: ${plantDetail.scientificName}\nMedicinal Properties: ${plantDetail.medicinalTags?.join(', ') || 'None'}\n\nShared via Ancestree Plant App`;
-                                    Clipboard.setString(shareText);
-                                    setShowSharingOptions(false);
-                                    Alert.alert('Shared!', 'Plant details copied to clipboard.');
-                                }}
-                            >
-                                <Text style={{ fontSize: 20, marginRight: 12 }}>📋</Text>
-                                <View>
-                                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151' }}>
-                                        Copy Details
-                                    </Text>
-                                    <Text style={{ fontSize: 12, color: '#6b7280' }}>
-                                        Copy plant information to clipboard
-                                    </Text>
-                                </View>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={{
-                                    flexDirection: 'row',
-                                    alignItems: 'center',
-                                    padding: 16,
-                                    backgroundColor: '#f8fafc',
-                                    borderRadius: 8,
-                                    borderWidth: 1,
-                                    borderColor: '#e2e8f0'
-                                }}
-                                onPress={() => {
-                                    const shareText = `I found this amazing plant: ${plantDetail.commonNames?.[0] || plantDetail.scientificName} using the Ancestree Plant Identification App! 🌿`;
-                                    Clipboard.setString(shareText);
-                                    setShowSharingOptions(false);
-                                    Alert.alert('Shared!', 'Social media text copied to clipboard.');
-                                }}
-                            >
-                                <Text style={{ fontSize: 20, marginRight: 12 }}>📱</Text>
-                                <View>
-                                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151' }}>
-                                        Social Media
-                                    </Text>
-                                    <Text style={{ fontSize: 12, color: '#6b7280' }}>
-                                        Copy text for social media posts
-                                    </Text>
-                                </View>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={{
-                                    flexDirection: 'row',
-                                    alignItems: 'center',
-                                    padding: 16,
-                                    backgroundColor: '#f8fafc',
-                                    borderRadius: 8,
-                                    borderWidth: 1,
-                                    borderColor: '#e2e8f0'
-                                }}
-                                onPress={() => {
-                                    const shareText = `Plant: ${plantDetail.commonNames?.[0] || plantDetail.scientificName}\nScientific: ${plantDetail.scientificName}\nProperties: ${plantDetail.medicinalTags?.join(', ') || 'None'}\nUsage: ${plantDetail.traditionalUsage || 'Not available'}\n\nLocation: ${plantDetail.allSightings?.[0]?.address || 'Location not specified'}`;
-                                    Clipboard.setString(shareText);
-                                    setShowSharingOptions(false);
-                                    Alert.alert('Shared!', 'Detailed report copied to clipboard.');
-                                }}
-                            >
-                                <Text style={{ fontSize: 20, marginRight: 12 }}>📄</Text>
-                                <View>
-                                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151' }}>
-                                        Detailed Report
-                                    </Text>
-                                    <Text style={{ fontSize: 12, color: '#6b7280' }}>
-                                        Copy comprehensive plant report
-                                    </Text>
-                                </View>
-                            </TouchableOpacity>
-                        </View>
-
-                        <TouchableOpacity
-                            style={{
-                                marginTop: 16,
-                                padding: 12,
-                                backgroundColor: '#6b7280',
-                                borderRadius: 8,
-                                alignItems: 'center'
-                            }}
-                            onPress={() => setShowSharingOptions(false)}
-                        >
-                            <Text style={{ color: 'white', fontWeight: '600' }}>
-                                Cancel
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
 
             {/* Medicinal Q&A Modal */}
             <PlantMedicinalQAModal

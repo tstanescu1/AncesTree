@@ -45,13 +45,9 @@ export default function PlantSuggestionsView({
   // Get location directly from hook - this is the clever fix!
   const { currentLocation } = useLocationHandler();
   
-  const [selectedSuggestion, setSelectedSuggestion] = useState<PlantSuggestion | null>(null);
-  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [showRequestBetterModal, setShowRequestBetterModal] = useState(false);
-  const [userFeedback, setUserFeedback] = useState('');
   const [userDescription, setUserDescription] = useState('');
   const [isLoading, setIsLoading] = useState(false); // For better identification
-  const [isAddingToCollection, setIsAddingToCollection] = useState(false); // For adding to collection
   const [rejectedSuggestions, setRejectedSuggestions] = useState<string[]>([]);
   const [visibleSuggestions, setVisibleSuggestions] = useState<PlantSuggestion[]>(suggestions);
   const [fadingOutSuggestions, setFadingOutSuggestions] = useState<Set<string>>(new Set());
@@ -108,36 +104,10 @@ export default function PlantSuggestionsView({
     suggestion => !rejectedSuggestions.includes(suggestion.scientificName)
   );
 
-  const handleSelectPlant = (suggestion: PlantSuggestion) => {
+  const handleSelectPlant = async (suggestion: PlantSuggestion) => {
     // Set loading immediately for user feedback
     setLocalLoading(true);
     
-    // Small delay to show the loading state, then open confirmation modal
-    setTimeout(() => {
-      setConfirmationSuggestion(suggestion);
-      setShowConfirmationModal(true);
-      setLocalLoading(false); // Reset after modal opens
-    }, 100);
-  };
-
-  const handleConfirmPlant = (confirmedPlant: PlantSuggestion) => {
-    setSelectedSuggestion(confirmedPlant);
-    setShowFeedbackModal(true);
-    setUserFeedback('');
-    setShowConfirmationModal(false);
-    setConfirmationSuggestion(null);
-  };
-
-  const handleRequestBetterFromConfirmation = (userDescription: string, rejectedSuggestions: string[]) => {
-    onRequestBetterIdentification(userDescription, rejectedSuggestions);
-    setShowConfirmationModal(false);
-    setConfirmationSuggestion(null);
-  };
-
-  const confirmSelection = async (withFeedback: boolean = false) => {
-    if (!selectedSuggestion) return;
-    
-    setIsAddingToCollection(true);
     try {
       // Clever fix: Use currentLocation from hook (which gets updated when GPS button is clicked)
       // or fall back to selectedLocation prop (for map-selected locations)
@@ -147,17 +117,39 @@ export default function PlantSuggestionsView({
       console.log('  currentLocation from hook:', currentLocation);
       console.log('  selectedLocation from prop:', selectedLocation);
       
-      await onPlantSelected(selectedSuggestion, withFeedback ? userFeedback : undefined, locationToUse, medicinalDetails);
-      setShowFeedbackModal(false);
-      setUserFeedback('');
-      setSelectedSuggestion(null);
-      setMedicinalDetails(null);
+      await onPlantSelected(suggestion, undefined, locationToUse, medicinalDetails);
     } catch (error) {
       console.error('Error adding plant to collection:', error);
     } finally {
-      setIsAddingToCollection(false);
+      setLocalLoading(false);
     }
   };
+
+  const handleConfirmPlant = async (confirmedPlant: PlantSuggestion) => {
+    try {
+      // Clever fix: Use currentLocation from hook (which gets updated when GPS button is clicked)
+      // or fall back to selectedLocation prop (for map-selected locations)
+      const locationToUse = currentLocation || selectedLocation;
+      
+      console.log('🔍 CLEVER FIX - Using location:', locationToUse);
+      console.log('  currentLocation from hook:', currentLocation);
+      console.log('  selectedLocation from prop:', selectedLocation);
+      
+      await onPlantSelected(confirmedPlant, undefined, locationToUse, medicinalDetails);
+      setShowConfirmationModal(false);
+      setConfirmationSuggestion(null);
+    } catch (error) {
+      console.error('Error adding plant to collection:', error);
+    }
+  };
+
+  const handleRequestBetterFromConfirmation = (userDescription: string, rejectedSuggestions: string[]) => {
+    onRequestBetterIdentification(userDescription, rejectedSuggestions);
+    setShowConfirmationModal(false);
+    setConfirmationSuggestion(null);
+  };
+
+
 
   const rejectSuggestion = (scientificName: string, commonName: string) => {
     // Get animation values for this suggestion
@@ -508,7 +500,7 @@ export default function PlantSuggestionsView({
                           uri: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMTgiIGZpbGw9IiNGM0Y0RjYiLz4KPHN2ZyB4PSIxNCIgeT0iMTQiIHdpZHRoPSIxMiIgaGVpZ2h0PSIxMiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM5Q0EzQUYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KPHBhdGggZD0ibTE5IDcgNCA0IDQtNE03IDNhMSAxIDAgMCAxIDEtMWg5YTEgMSAwIDAgMSAxIDFWOGExIDEgMCAwIDEtMSAxSDhhMSAxIDAgMCAxLTEtMVoiLz4KPHN2ZyB4PSI0IiB5PSI0IiB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjOUNBM0FGIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+CjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjEwIi8+CjxtIDEyIDZhNiA2IDAgMCAwIDYgNiIvPgo8L3N2Zz4KPC9zdmc+' 
                         }}
                         onLoad={() => {
-                          console.log(`✅ Successfully loaded image: ${suggestion.imageUrl}`);
+                          console.log(`✅ Successfully loaded image`);
                         }}
                         onError={() => {
                           console.log(`❌ Failed to load image: ${suggestion.imageUrl}`);
@@ -517,7 +509,7 @@ export default function PlantSuggestionsView({
                           console.log(`🔄 Starting to load image: ${suggestion.imageUrl}`);
                         }}
                         onLoadEnd={() => {
-                          console.log(`🏁 Finished loading image: ${suggestion.imageUrl}`);
+                          console.log(`🏁 Finished loading image`);
                         }}
                       />
                       {/* Visual comparison hint */}
@@ -646,7 +638,7 @@ export default function PlantSuggestionsView({
                     disabled={isLoadingCombined}
                   >
                     <Text style={{ color: 'white', fontWeight: '600', fontSize: 14 }}>
-                      {isLoadingCombined ? '⏳ Processing...' : '✓ Select This Plant'}
+                      {isLoadingCombined ? '⏳ Processing...' : '✓ Add to Collection'}
                     </Text>
                   </TouchableOpacity>
 
@@ -687,10 +679,10 @@ export default function PlantSuggestionsView({
                   }}
                 >
                   <Text style={{ color: 'white', fontWeight: '600', fontSize: 13 }}>
-                    🤖 Confirm with AI Questions
+                    🤖 In doubt? Confirm with AI Questions
                   </Text>
-                  <Text style={{ color: '#bae6fd', fontSize: 11, marginTop: 2 }}>
-                    Answer specific questions to verify this is the right plant
+                  <Text style={{ color: '#bae6fd', fontSize: 11, marginVertical: 2, paddingHorizontal: 15 }}>
+                    Answer specific questions to verify
                   </Text>
                 </TouchableOpacity>
               </Animated.View>
@@ -944,124 +936,7 @@ export default function PlantSuggestionsView({
         </View>
       </Modal>
 
-      {/* Plant Selection Confirmation Modal */}
-      <Modal
-        visible={showFeedbackModal}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowFeedbackModal(false)}
-      >
-        <View style={{
-          flex: 1,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: 20
-        }}>
-          <View style={{
-            backgroundColor: 'white',
-            borderRadius: 16,
-            padding: 24,
-            width: '100%',
-            maxWidth: 420,
-            maxHeight: '90%'
-          }}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#15803d', marginBottom: 16, textAlign: 'center' }}>
-                Confirm Plant Selection
-              </Text>
-              
-              {selectedSuggestion && (
-                <>
-                  <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 8 }}>
-                    {selectedSuggestion.commonNames[0] || selectedSuggestion.scientificName}
-                  </Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>
-                    Confidence: {selectedSuggestion.probability}%
-                  </Text>
-                </>
-              )}
 
-              {/* Notes Section */}
-              <Text style={{ fontSize: 14, color: '#374151', marginBottom: 12 }}>
-                Optional: Add any notes or corrections about this identification:
-              </Text>
-              
-              <TextInput
-                style={{
-                  borderWidth: 1,
-                  borderColor: '#d1d5db',
-                  borderRadius: 8,
-                  padding: 12,
-                  height: 80,
-                  textAlignVertical: 'top',
-                  marginBottom: 16
-                }}
-                placeholder="e.g., 'Flowers were actually purple, not white' or 'Found in urban area'"
-                multiline
-                value={userFeedback}
-                onChangeText={setUserFeedback}
-              />
-
-              {/* Medicinal Details Button */}
-              <TouchableOpacity
-                style={{
-                  backgroundColor: '#f0fdf4',
-                  borderWidth: 1,
-                  borderColor: '#bbf7d0',
-                  paddingVertical: 12,
-                  borderRadius: 8,
-                  alignItems: 'center',
-                  marginBottom: 20
-                }}
-                onPress={() => {
-                  setShowFeedbackModal(false);
-                  setShowMedicinalDetailsModal(true);
-                }}
-              >
-                <Text style={{ color: '#166534', fontWeight: '600' }}>
-                  🌿 Add Medicinal Details
-                </Text>
-              </TouchableOpacity>
-
-              {/* Action Buttons */}
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <TouchableOpacity
-                  style={{
-                    flex: 1,
-                    backgroundColor: '#6b7280',
-                    paddingVertical: 12,
-                    borderRadius: 8,
-                    alignItems: 'center'
-                  }}
-                  onPress={() => {
-                    setShowFeedbackModal(false);
-                  }}
-                >
-                  <Text style={{ color: 'white', fontWeight: '600' }}>Cancel</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={{
-                    flex: 1,
-                    backgroundColor: isAddingToCollection ? '#9ca3af' : '#059669',
-                    paddingVertical: 12,
-                    borderRadius: 8,
-                    alignItems: 'center',
-                    opacity: isAddingToCollection ? 0.6 : 1,
-                  }}
-                  onPress={() => confirmSelection(true)}
-                  disabled={isAddingToCollection}
-                >
-                  <Text style={{ color: 'white', fontWeight: '600' }}>
-                    {isAddingToCollection ? '⏳ Adding...' : 'Add to Collection'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
 
       {/* Request Better Identification Modal */}
       <Modal
@@ -1275,9 +1150,8 @@ export default function PlantSuggestionsView({
         onSave={(details) => {
           setMedicinalDetails(details);
           setShowMedicinalDetailsModal(false);
-          setShowFeedbackModal(true);
         }}
-        plantName={selectedSuggestion?.commonNames[0] || selectedSuggestion?.scientificName || ''}
+        plantName={''}
       />
 
       {/* AI Confirmation Modal */}

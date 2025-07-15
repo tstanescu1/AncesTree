@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Image, Modal, ScrollView, ActivityIndicator, Alert, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, Image, Modal, ScrollView, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { api } from "../../convex/_generated/api";
 import { useAction } from "convex/react";
 
@@ -16,7 +16,7 @@ interface ConfirmationQuestion {
     id: string;
     question: string;
     options: string[];
-    correctAnswer?: string;
+    correctAnswer: string;
     reasoning: string;
 }
 
@@ -35,8 +35,16 @@ export default function PlantConfirmationModal({
     const [confidence, setConfidence] = useState<number>(0);
     const [showCustomQuestion, setShowCustomQuestion] = useState(false);
     const [customQuestion, setCustomQuestion] = useState('');
+    const [showPersonalDescription, setShowPersonalDescription] = useState(false);
+    const [personalDescription, setPersonalDescription] = useState('');
+    const [refinedConfidence, setRefinedConfidence] = useState<number>(0);
+    const [showRefinedResult, setShowRefinedResult] = useState(false);
+    const [refinedAnalysis, setRefinedAnalysis] = useState<any>(null);
+    const [savingInteraction, setSavingInteraction] = useState(false);
 
     const generateConfirmationQuestions = useAction(api.identifyPlant.generateConfirmationQuestions);
+    const refineIdentificationWithDescription = useAction(api.identifyPlant.refineIdentificationWithDescription);
+    const saveUserConfirmation = useAction(api.identifyPlant.saveUserConfirmation);
 
     // Generate AI questions when modal opens
     useEffect(() => {
@@ -55,10 +63,13 @@ export default function PlantConfirmationModal({
                 imageUrl: plantSuggestion.imageUrl
             });
             
+            console.log('📋 Generated questions:', result.questions);
             setQuestions(result.questions);
             setCurrentQuestionIndex(0);
             setUserAnswers({});
             setConfidence(0);
+            setShowPersonalDescription(false);
+            setShowRefinedResult(false);
         } catch (error) {
             console.error('Failed to generate confirmation questions:', error);
             Alert.alert('Error', 'Failed to generate confirmation questions. Please try again.');
@@ -68,30 +79,74 @@ export default function PlantConfirmationModal({
     };
 
     const handleAnswer = (questionId: string, answer: string) => {
+        console.log('🎯 User answered:', { questionId, answer });
         setUserAnswers(prev => ({ ...prev, [questionId]: answer }));
         
         // Move to next question or calculate confidence
         if (currentQuestionIndex < questions.length - 1) {
             setCurrentQuestionIndex(prev => prev + 1);
         } else {
+            console.log('🏁 All questions answered, calculating confidence...');
             calculateConfidence();
         }
     };
 
     const calculateConfidence = () => {
         let correctAnswers = 0;
+        let totalQuestions = 0;
+        
         questions.forEach(question => {
             const userAnswer = userAnswers[question.id];
-            if (userAnswer === question.correctAnswer) {
-                correctAnswers++;
+            if (question.correctAnswer && userAnswer) {
+                totalQuestions++;
+                if (userAnswer === question.correctAnswer) {
+                    correctAnswers++;
+                }
             }
         });
         
-        const confidenceScore = (correctAnswers / questions.length) * 100;
+        const confidenceScore = totalQuestions > 0 ? (correctAnswers / totalQuestions) * 100 : 0;
+        console.log('🔍 Confidence calculation:', {
+            correctAnswers,
+            totalQuestions,
+            confidenceScore,
+            userAnswers,
+            questions: questions.map(q => ({ id: q.id, correctAnswer: q.correctAnswer, userAnswer: userAnswers[q.id] }))
+        });
         setConfidence(confidenceScore);
     };
 
-    const handleConfirm = () => {
+    const handleConfirm = async () => {
+        setSavingInteraction(true);
+        try {
+            // Save the confirmation interaction
+            const userAnswersData = questions.map(q => ({
+                questionId: q.id,
+                question: q.question,
+                userAnswer: userAnswers[q.id] || '',
+                correctAnswer: q.correctAnswer,
+                reasoning: q.reasoning
+            }));
+
+            const finalConfidenceScore = refinedConfidence > 0 ? refinedConfidence : confidence;
+
+            await saveUserConfirmation({
+                plantId: plantSuggestion._id,
+                scientificName: plantSuggestion.scientificName,
+                userAnswers: userAnswersData,
+                finalConfidence: finalConfidenceScore,
+                refinedAnalysis: refinedAnalysis || undefined,
+                userPhotoBase64: userPhotoBase64
+            });
+
+            console.log('✅ Confirmation interaction saved');
+        } catch (error) {
+            console.error('❌ Failed to save confirmation interaction:', error);
+            // Continue with confirmation even if saving fails
+        } finally {
+            setSavingInteraction(false);
+        }
+
         onConfirm(plantSuggestion);
         onClose();
     };
@@ -100,6 +155,29 @@ export default function PlantConfirmationModal({
         const userDescription = customQuestion || `I'm not sure this is ${plantSuggestion?.scientificName || 'this plant'}. ${questions.map(q => q.question).join(' ')}`;
         onRequestBetterIdentification(userDescription, plantSuggestion?.scientificName ? [plantSuggestion.scientificName] : []);
         onClose();
+    };
+
+    const handleRefineWithDescription = async () => {
+        if (!personalDescription.trim()) return;
+        
+        setLoading(true);
+        try {
+            const result = await refineIdentificationWithDescription({
+                scientificName: plantSuggestion.scientificName,
+                userDescription: personalDescription,
+                currentConfidence: confidence,
+                userPhotoBase64: userPhotoBase64
+            });
+            
+            setRefinedConfidence(result.refinedConfidence);
+            setRefinedAnalysis(result);
+            setShowRefinedResult(true);
+        } catch (error) {
+            console.error('Failed to refine identification:', error);
+            Alert.alert('Error', 'Failed to refine identification. Please try again.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     const currentQuestion = questions[currentQuestionIndex];
@@ -111,297 +189,604 @@ export default function PlantConfirmationModal({
 
     return (
         <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-            <View style={{ flex: 1, backgroundColor: '#f0fdf4' }}>
-                {/* Header */}
-                <View style={{ 
-                    flexDirection: 'row', 
-                    justifyContent: 'space-between', 
-                    alignItems: 'center',
-                    paddingTop: 60,
-                    paddingHorizontal: 20,
-                    paddingBottom: 20,
-                    backgroundColor: 'white',
-                    borderBottomWidth: 1,
-                    borderBottomColor: '#e5e7eb'
-                }}>
-                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#166534' }}>
-                        🔍 Confirm Identification
-                    </Text>
-                    <TouchableOpacity onPress={onClose} style={{ padding: 8 }}>
-                        <Text style={{ fontSize: 24, color: '#6b7280' }}>✕</Text>
-                    </TouchableOpacity>
-                </View>
-
-                <ScrollView style={{ flex: 1, padding: 20 }}>
-                    {/* Plant Info */}
+            <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+                <View style={{ flex: 1, backgroundColor: '#f0fdf4' }}>
+                    {/* Header */}
                     <View style={{ 
-                        backgroundColor: 'white', 
-                        borderRadius: 12, 
-                        padding: 16, 
-                        marginBottom: 20,
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: 2 },
-                        shadowOpacity: 0.1,
-                        shadowRadius: 4,
-                        elevation: 3
+                        flexDirection: 'row', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center',
+                        paddingTop: 15,
+                        paddingHorizontal: 20,
+                        paddingBottom: 20,
+                        backgroundColor: 'white',
+                        borderBottomWidth: 1,
+                        borderBottomColor: '#e5e7eb'
                     }}>
-                                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#166534', marginBottom: 8 }}>
-                        {plantSuggestion?.commonNames?.[0] || plantSuggestion?.scientificName || 'Unknown Plant'}
-                    </Text>
-                    <Text style={{ fontSize: 14, fontStyle: 'italic', color: '#6b7280', marginBottom: 12 }}>
-                        {plantSuggestion?.scientificName || 'Unknown Species'}
-                    </Text>
-                        
-                        {/* Visual Comparison */}
-                        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-                            <View style={{ flex: 1 }}>
-                                <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>Your Photo</Text>
-                                <Image 
-                                    source={{ uri: `data:image/jpeg;base64,${userPhotoBase64}` }}
-                                    style={{ width: '100%', height: 120, borderRadius: 8 }}
-                                    resizeMode="cover"
-                                />
-                            </View>
-                            <View style={{ flex: 1 }}>
-                                <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>Reference</Text>
-                                <Image 
-                                    source={{ uri: plantSuggestion?.imageUrl }}
-                                    style={{ width: '100%', height: 120, borderRadius: 8 }}
-                                    resizeMode="cover"
-                                />
-                            </View>
-                        </View>
-
-                        <Text style={{ fontSize: 12, color: '#6b7280' }}>
-                            AI Confidence: {plantSuggestion?.probability ? Math.round(plantSuggestion.probability * 100) : 'Unknown'}%
+                        <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#166534' }}>
+                            🔍 Confirm Identification
                         </Text>
+                        <TouchableOpacity onPress={onClose} style={{ padding: 8 }}>
+                            <Text style={{ fontSize: 24, color: '#6b7280' }}>✕</Text>
+                        </TouchableOpacity>
                     </View>
 
-                    {/* Loading State */}
-                    {loading && (
-                        <View style={{ alignItems: 'center', padding: 40 }}>
-                            <ActivityIndicator size="large" color="#059669" />
-                            <Text style={{ marginTop: 16, color: '#059669', fontSize: 16 }}>
-                                🤖 AI is analyzing your plant...
-                            </Text>
-                        </View>
-                    )}
-
-                    {/* Questions */}
-                    {!loading && questions.length > 0 && currentQuestion && confidence === 0 && (
+                    <ScrollView style={{ flex: 1, padding: 20 }}>
+                        {/* Plant Info */}
                         <View style={{ 
                             backgroundColor: 'white', 
                             borderRadius: 12, 
-                            padding: 20,
+                            padding: 16, 
+                            marginBottom: 20,
                             shadowColor: '#000',
                             shadowOffset: { width: 0, height: 2 },
                             shadowOpacity: 0.1,
                             shadowRadius: 4,
                             elevation: 3
                         }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-                                <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', flex: 1 }}>
-                                    Question {currentQuestionIndex + 1} of {questions.length}
-                                </Text>
-                                <View style={{ 
-                                    backgroundColor: '#f0fdf4', 
-                                    paddingHorizontal: 8, 
-                                    paddingVertical: 4, 
-                                    borderRadius: 12 
-                                }}>
-                                    <Text style={{ fontSize: 12, color: '#059669', fontWeight: '600' }}>
-                                        AI-Powered
-                                    </Text>
-                                </View>
-                            </View>
-
-                            <Text style={{ fontSize: 16, color: '#374151', marginBottom: 20, lineHeight: 24 }}>
-                                {currentQuestion.question}
+                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#166534', marginBottom: 8 }}>
+                                {plantSuggestion?.commonNames?.[0] || plantSuggestion?.scientificName || 'Unknown Plant'}
                             </Text>
-
-                            <View style={{ gap: 12 }}>
-                                {currentQuestion.options.map((option, index) => (
-                                    <TouchableOpacity
-                                        key={index}
-                                        style={{
-                                            padding: 16,
-                                            borderRadius: 8,
-                                            borderWidth: 2,
-                                            borderColor: userAnswers[currentQuestion.id] === option ? '#059669' : '#e5e7eb',
-                                            backgroundColor: userAnswers[currentQuestion.id] === option ? '#f0fdf4' : 'white'
-                                        }}
-                                        onPress={() => handleAnswer(currentQuestion.id, option)}
-                                    >
-                                        <Text style={{ 
-                                            fontSize: 14, 
-                                            color: userAnswers[currentQuestion.id] === option ? '#059669' : '#374151',
-                                            fontWeight: userAnswers[currentQuestion.id] === option ? '600' : '400'
-                                        }}>
-                                            {option}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-
-                            {currentQuestion.reasoning && (
-                                <View style={{ 
-                                    marginTop: 16, 
-                                    padding: 12, 
-                                    backgroundColor: '#fef3c7', 
-                                    borderRadius: 8 
-                                }}>
-                                    <Text style={{ fontSize: 12, color: '#92400e', fontStyle: 'italic' }}>
-                                        💡 {currentQuestion.reasoning}
-                                    </Text>
-                                </View>
-                            )}
-                        </View>
-                    )}
-
-                    {/* Confidence Result */}
-                    {confidence > 0 && (
-                        <View style={{ 
-                            backgroundColor: 'white', 
-                            borderRadius: 12, 
-                            padding: 20,
-                            shadowColor: '#000',
-                            shadowOffset: { width: 0, height: 2 },
-                            shadowOpacity: 0.1,
-                            shadowRadius: 4,
-                            elevation: 3
-                        }}>
-                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#166534', marginBottom: 16 }}>
-                                🎯 Confirmation Result
+                            <Text style={{ fontSize: 14, fontStyle: 'italic', color: '#6b7280', marginBottom: 12 }}>
+                                {plantSuggestion?.scientificName || 'Unknown Species'}
                             </Text>
                             
-                            <View style={{ 
-                                backgroundColor: confidence >= 70 ? '#f0fdf4' : confidence >= 40 ? '#fef3c7' : '#fef2f2',
-                                padding: 16,
-                                borderRadius: 8,
-                                marginBottom: 20
-                            }}>
-                                <Text style={{ 
-                                    fontSize: 16, 
-                                    fontWeight: '600',
-                                    color: confidence >= 70 ? '#059669' : confidence >= 40 ? '#d97706' : '#dc2626',
-                                    marginBottom: 8
-                                }}>
-                                    Confidence: {Math.round(confidence)}%
-                                </Text>
-                                <Text style={{ fontSize: 14, color: '#6b7280' }}>
-                                    {confidence >= 70 ? '✅ High confidence - This appears to be the correct identification' :
-                                     confidence >= 40 ? '⚠️ Medium confidence - Some features match but there may be alternatives' :
-                                     '❌ Low confidence - This may not be the correct plant'}
-                                </Text>
+                            {/* Visual Comparison */}
+                            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>Your Photo</Text>
+                                    <Image 
+                                        source={{ uri: `data:image/jpeg;base64,${userPhotoBase64}` }}
+                                        style={{ width: '100%', height: 120, borderRadius: 8 }}
+                                        resizeMode="cover"
+                                    />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>Reference</Text>
+                                    <Image 
+                                        source={{ uri: plantSuggestion?.imageUrl }}
+                                        style={{ width: '100%', height: 120, borderRadius: 8 }}
+                                        resizeMode="cover"
+                                    />
+                                </View>
                             </View>
 
-                            {/* Action Buttons */}
-                            <View style={{ gap: 12 }}>
-                                {confidence >= 70 && (
+                            <Text style={{ fontSize: 12, color: '#6b7280' }}>
+                                AI Confidence: {plantSuggestion?.probability ? Math.round(plantSuggestion.probability) : 'Unknown'}%
+                            </Text>
+                        </View>
+
+                        {/* Loading State */}
+                        {loading && (
+                            <View style={{ alignItems: 'center', padding: 40 }}>
+                                <ActivityIndicator size="large" color="#059669" />
+                                <Text style={{ marginTop: 16, color: '#059669', fontSize: 16 }}>
+                                    🤖 AI is analyzing your plant...
+                                </Text>
+                            </View>
+                        )}
+
+                        {/* Questions */}
+                        {!loading && questions.length > 0 && currentQuestion && confidence === 0 && !showPersonalDescription && !showRefinedResult && (
+                            <View style={{ 
+                                backgroundColor: 'white', 
+                                borderRadius: 12, 
+                                padding: 20,
+                                shadowColor: '#000',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.1,
+                                shadowRadius: 4,
+                                elevation: 3,
+                                marginBottom: 30
+                            }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', flex: 1 }}>
+                                        Question {currentQuestionIndex + 1} of {questions.length}
+                                    </Text>
+                                    <View style={{ 
+                                        backgroundColor: '#f0fdf4', 
+                                        paddingHorizontal: 8, 
+                                        paddingVertical: 4, 
+                                        borderRadius: 12 
+                                    }}>
+                                        <Text style={{ fontSize: 12, color: '#059669', fontWeight: '600' }}>
+                                            AI-Powered
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                <Text style={{ fontSize: 16, color: '#374151', marginBottom: 20, lineHeight: 24 }}>
+                                    {currentQuestion.question}
+                                </Text>
+
+                                <View style={{ gap: 12 }}>
+                                    {currentQuestion.options.map((option, index) => (
+                                        <TouchableOpacity
+                                            key={index}
+                                            style={{
+                                                padding: 16,
+                                                borderRadius: 8,
+                                                borderWidth: 2,
+                                                borderColor: userAnswers[currentQuestion.id] === option ? '#059669' : '#e5e7eb',
+                                                backgroundColor: userAnswers[currentQuestion.id] === option ? '#f0fdf4' : 'white'
+                                            }}
+                                            onPress={() => handleAnswer(currentQuestion.id, option)}
+                                        >
+                                            <Text style={{ 
+                                                fontSize: 14, 
+                                                color: userAnswers[currentQuestion.id] === option ? '#059669' : '#374151',
+                                                fontWeight: userAnswers[currentQuestion.id] === option ? '600' : '400'
+                                            }}>
+                                                {option}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+
+                                {currentQuestion.reasoning && (
+                                    <View style={{ 
+                                        marginTop: 16, 
+                                        padding: 12, 
+                                        backgroundColor: '#fef3c7', 
+                                        borderRadius: 8 
+                                    }}>
+                                        <Text style={{ fontSize: 12, color: '#92400e', fontStyle: 'italic' }}>
+                                            💡 {currentQuestion.reasoning}
+                                        </Text>
+                                    </View>
+                                )}
+                            </View>
+                        )}
+
+                        {/* Confidence Result */}
+                        {confidence > 0 && !showPersonalDescription && !showRefinedResult && (
+                            <View style={{ 
+                                backgroundColor: 'white', 
+                                borderRadius: 12, 
+                                padding: 20,
+                                shadowColor: '#000',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.1,
+                                shadowRadius: 4,
+                                elevation: 3
+                            }}>
+                                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#166534', marginBottom: 16 }}>
+                                    🎯 Confirmation Result
+                                </Text>
+                                
+                                <View style={{ 
+                                    backgroundColor: confidence >= 70 ? '#f0fdf4' : confidence >= 40 ? '#fef3c7' : '#fef2f2',
+                                    padding: 16,
+                                    borderRadius: 8,
+                                    marginBottom: 20
+                                }}>
+                                    <Text style={{ 
+                                        fontSize: 16, 
+                                        fontWeight: '600',
+                                        color: confidence >= 70 ? '#059669' : confidence >= 40 ? '#d97706' : '#dc2626',
+                                        marginBottom: 8
+                                    }}>
+                                        Confidence: {Math.round(confidence)}%
+                                    </Text>
+                                    <Text style={{ fontSize: 14, color: '#6b7280' }}>
+                                        {confidence >= 70 ? '✅ High confidence - This appears to be the correct identification' :
+                                         confidence >= 40 ? '⚠️ Medium confidence - Some features match but there may be alternatives' :
+                                         '❌ Low confidence - This may not be the correct plant'}
+                                    </Text>
+                                </View>
+
+                                {/* Action Buttons */}
+                                <View style={{ gap: 12 }}>
+                                    {confidence >= 70 && (
+                                        <TouchableOpacity
+                                            style={{
+                                                backgroundColor: '#059669',
+                                                padding: 16,
+                                                borderRadius: 8,
+                                                alignItems: 'center'
+                                            }}
+                                            onPress={handleConfirm}
+                                            disabled={savingInteraction}
+                                        >
+                                            {savingInteraction ? (
+                                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                    <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+                                                    <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
+                                                        💾 Saving...
+                                                    </Text>
+                                                </View>
+                                            ) : (
+                                                <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
+                                                    ✅ Confirm This Plant
+                                                </Text>
+                                            )}
+                                        </TouchableOpacity>
+                                    )}
+
+                                    {confidence < 70 && (
+                                        <TouchableOpacity
+                                            style={{
+                                                backgroundColor: '#0ea5e9',
+                                                padding: 16,
+                                                borderRadius: 8,
+                                                alignItems: 'center'
+                                            }}
+                                            onPress={() => setShowPersonalDescription(true)}
+                                        >
+                                            <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
+                                                🔍 Refine with More Details
+                                            </Text>
+                                            <Text style={{ color: '#bae6fd', fontSize: 12, marginTop: 4 }}>
+                                                Tell us more about what you see
+                                            </Text>
+                                        </TouchableOpacity>
+                                    )}
+
                                     <TouchableOpacity
                                         style={{
-                                            backgroundColor: '#059669',
+                                            backgroundColor: '#f3f4f6',
                                             padding: 16,
                                             borderRadius: 8,
                                             alignItems: 'center'
                                         }}
-                                        onPress={handleConfirm}
+                                        onPress={() => setShowCustomQuestion(true)}
                                     >
-                                        <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
-                                            ✅ Confirm This Plant
+                                        <Text style={{ color: '#374151', fontSize: 16, fontWeight: '600' }}>
+                                            🤖 Ask AI for Better Match
                                         </Text>
                                     </TouchableOpacity>
-                                )}
-
-                                <TouchableOpacity
-                                    style={{
-                                        backgroundColor: '#f3f4f6',
-                                        padding: 16,
-                                        borderRadius: 8,
-                                        alignItems: 'center'
-                                    }}
-                                    onPress={() => setShowCustomQuestion(true)}
-                                >
-                                    <Text style={{ color: '#374151', fontSize: 16, fontWeight: '600' }}>
-                                        🤖 Ask AI for Better Match
-                                    </Text>
-                                </TouchableOpacity>
+                                </View>
                             </View>
-                        </View>
-                    )}
+                        )}
 
-                    {/* Custom Question Input */}
-                    {showCustomQuestion && (
-                        <View style={{ 
-                            backgroundColor: 'white', 
-                            borderRadius: 12, 
-                            padding: 20,
-                            marginTop: 20,
-                            shadowColor: '#000',
-                            shadowOffset: { width: 0, height: 2 },
-                            shadowOpacity: 0.1,
-                            shadowRadius: 4,
-                            elevation: 3
-                        }}>
-                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 12 }}>
-                                🤖 Describe What You See
-                            </Text>
-                            <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>
-                                Tell the AI about specific features you notice that might help identify the plant better.
-                            </Text>
-                            
-                            <TextInput
-                                style={{
-                                    borderWidth: 1,
-                                    borderColor: '#d1d5db',
+                        {/* Personal Description Input */}
+                        {showPersonalDescription && (
+                            <View style={{ 
+                                backgroundColor: 'white', 
+                                borderRadius: 12, 
+                                padding: 20,
+                                marginTop: 20,
+                                shadowColor: '#000',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.1,
+                                shadowRadius: 4,
+                                elevation: 3
+                            }}>
+                                <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 12 }}>
+                                    🔍 Help Us Refine the Identification
+                                </Text>
+                                <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>
+                                    Current confidence: {Math.round(confidence)}%. Tell us more about what you observe to help us determine if this is the right plant or suggest a better match.
+                                </Text>
+                                
+                                <TextInput
+                                    style={{
+                                        borderWidth: 1,
+                                        borderColor: '#d1d5db',
+                                        borderRadius: 8,
+                                        padding: 12,
+                                        fontSize: 14,
+                                        color: '#374151',
+                                        backgroundColor: '#f9fafb',
+                                        minHeight: 100,
+                                        textAlignVertical: 'top'
+                                    }}
+                                    placeholder="e.g., The leaves are much smaller than shown, the flowers are a different color, it smells like mint when crushed, it grows in a different pattern..."
+                                    value={personalDescription}
+                                    onChangeText={setPersonalDescription}
+                                    multiline
+                                />
+                                
+                                <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+                                    <TouchableOpacity
+                                        style={{
+                                            flex: 1,
+                                            backgroundColor: '#059669',
+                                            padding: 12,
+                                            borderRadius: 8,
+                                            alignItems: 'center'
+                                        }}
+                                        onPress={handleRefineWithDescription}
+                                        disabled={!personalDescription.trim() || loading}
+                                    >
+                                        <Text style={{ color: 'white', fontSize: 14, fontWeight: '600' }}>
+                                            {loading ? '🔍 Analyzing...' : '🔍 Refine'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={{
+                                            flex: 1,
+                                            backgroundColor: '#f3f4f6',
+                                            padding: 12,
+                                            borderRadius: 8,
+                                            alignItems: 'center'
+                                        }}
+                                        onPress={() => setShowPersonalDescription(false)}
+                                    >
+                                        <Text style={{ color: '#374151', fontSize: 14, fontWeight: '600' }}>
+                                            Cancel
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        )}
+
+                        {/* Refined Result */}
+                        {showRefinedResult && refinedAnalysis && (
+                            <View style={{ 
+                                backgroundColor: 'white', 
+                                borderRadius: 12, 
+                                padding: 20,
+                                marginTop: 20,
+                                shadowColor: '#000',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.1,
+                                shadowRadius: 4,
+                                elevation: 3
+                            }}>
+                                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#166534', marginBottom: 16 }}>
+                                    🎯 Detailed Analysis Result
+                                </Text>
+                                
+                                {/* Confidence Summary */}
+                                <View style={{ 
+                                    backgroundColor: refinedConfidence >= 70 ? '#f0fdf4' : refinedConfidence >= 40 ? '#fef3c7' : '#fef2f2',
+                                    padding: 16,
                                     borderRadius: 8,
-                                    padding: 12,
-                                    fontSize: 14,
-                                    color: '#374151',
-                                    backgroundColor: '#f9fafb',
-                                    minHeight: 80,
-                                    textAlignVertical: 'top'
-                                }}
-                                placeholder="e.g., The leaves have tiny hairs, the flowers are bright yellow, it grows in clusters..."
-                                value={customQuestion}
-                                onChangeText={setCustomQuestion}
-                                multiline
-                            />
-                            
-                            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
-                                <TouchableOpacity
-                                    style={{
-                                        flex: 1,
-                                        backgroundColor: '#059669',
-                                        padding: 12,
-                                        borderRadius: 8,
-                                        alignItems: 'center'
-                                    }}
-                                    onPress={handleRequestBetter}
-                                >
-                                    <Text style={{ color: 'white', fontSize: 14, fontWeight: '600' }}>
-                                        🔍 Find Better Match
+                                    marginBottom: 20
+                                }}>
+                                    <Text style={{ 
+                                        fontSize: 16, 
+                                        fontWeight: '600',
+                                        color: refinedConfidence >= 70 ? '#059669' : refinedConfidence >= 40 ? '#d97706' : '#dc2626',
+                                        marginBottom: 8
+                                    }}>
+                                        Refined Confidence: {Math.round(refinedConfidence)}%
                                     </Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={{
-                                        flex: 1,
-                                        backgroundColor: '#f3f4f6',
-                                        padding: 12,
-                                        borderRadius: 8,
-                                        alignItems: 'center'
-                                    }}
-                                    onPress={() => setShowCustomQuestion(false)}
-                                >
-                                    <Text style={{ color: '#374151', fontSize: 14, fontWeight: '600' }}>
-                                        Cancel
-                                    </Text>
-                                </TouchableOpacity>
+                                    {refinedAnalysis.confidenceExplanation && (
+                                        <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 8, fontStyle: 'italic' }}>
+                                            {refinedAnalysis.confidenceExplanation}
+                                        </Text>
+                                    )}
+                                </View>
+
+                                {/* Detailed Analysis */}
+                                <ScrollView style={{ maxHeight: 400 }}>
+                                    {/* Detailed Reasoning */}
+                                    {refinedAnalysis.detailedReasoning && (
+                                        <View style={{ marginBottom: 16 }}>
+                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 8 }}>
+                                                📝 Analysis Summary
+                                            </Text>
+                                            <Text style={{ fontSize: 13, color: '#6b7280', lineHeight: 18 }}>
+                                                {refinedAnalysis.detailedReasoning}
+                                            </Text>
+                                        </View>
+                                    )}
+
+                                    {/* Matching Features */}
+                                    {refinedAnalysis.matchingFeatures && refinedAnalysis.matchingFeatures.length > 0 && (
+                                        <View style={{ marginBottom: 16 }}>
+                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#059669', marginBottom: 8 }}>
+                                                ✅ Matching Features
+                                            </Text>
+                                            {refinedAnalysis.matchingFeatures.map((feature: string, index: number) => (
+                                                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                                    <Text style={{ fontSize: 12, color: '#059669', marginRight: 8 }}>•</Text>
+                                                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>{feature}</Text>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    )}
+
+                                    {/* Contradicting Features */}
+                                    {refinedAnalysis.contradictingFeatures && refinedAnalysis.contradictingFeatures.length > 0 && (
+                                        <View style={{ marginBottom: 16 }}>
+                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#dc2626', marginBottom: 8 }}>
+                                                ❌ Contradicting Features
+                                            </Text>
+                                            {refinedAnalysis.contradictingFeatures.map((feature: string, index: number) => (
+                                                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                                    <Text style={{ fontSize: 12, color: '#dc2626', marginRight: 8 }}>•</Text>
+                                                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>{feature}</Text>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    )}
+
+                                    {/* Key Distinguishing Features */}
+                                    {refinedAnalysis.keyDistinguishingFeatures && refinedAnalysis.keyDistinguishingFeatures.length > 0 && (
+                                        <View style={{ marginBottom: 16 }}>
+                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#0ea5e9', marginBottom: 8 }}>
+                                                🔍 Key Distinguishing Features
+                                            </Text>
+                                            {refinedAnalysis.keyDistinguishingFeatures.map((feature: string, index: number) => (
+                                                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                                    <Text style={{ fontSize: 12, color: '#0ea5e9', marginRight: 8 }}>•</Text>
+                                                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>{feature}</Text>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    )}
+
+                                    {/* Environmental Notes */}
+                                    {refinedAnalysis.environmentalNotes && (
+                                        <View style={{ marginBottom: 16 }}>
+                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#d97706', marginBottom: 8 }}>
+                                                🌱 Environmental Factors
+                                            </Text>
+                                            <Text style={{ fontSize: 13, color: '#6b7280', lineHeight: 18 }}>
+                                                {refinedAnalysis.environmentalNotes}
+                                            </Text>
+                                        </View>
+                                    )}
+
+                                    {/* Similar Species */}
+                                    {refinedAnalysis.similarSpecies && refinedAnalysis.similarSpecies.length > 0 && (
+                                        <View style={{ marginBottom: 16 }}>
+                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#7c3aed', marginBottom: 8 }}>
+                                                🔄 Similar Species to Consider
+                                            </Text>
+                                            {refinedAnalysis.similarSpecies.map((species: string, index: number) => (
+                                                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                                    <Text style={{ fontSize: 12, color: '#7c3aed', marginRight: 8 }}>•</Text>
+                                                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>{species}</Text>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    )}
+
+                                    {/* Suggestions */}
+                                    {refinedAnalysis.suggestions && refinedAnalysis.suggestions.length > 0 && (
+                                        <View style={{ marginBottom: 16 }}>
+                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#059669', marginBottom: 8 }}>
+                                                💡 Next Steps
+                                            </Text>
+                                            {refinedAnalysis.suggestions.map((suggestion: string, index: number) => (
+                                                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                                    <Text style={{ fontSize: 12, color: '#059669', marginRight: 8 }}>•</Text>
+                                                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>{suggestion}</Text>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    )}
+                                </ScrollView>
+
+                                {/* Action Buttons */}
+                                <View style={{ gap: 12, marginTop: 16 }}>
+                                    {refinedConfidence >= 70 && (
+                                        <TouchableOpacity
+                                            style={{
+                                                backgroundColor: '#059669',
+                                                padding: 16,
+                                                borderRadius: 8,
+                                                alignItems: 'center'
+                                            }}
+                                            onPress={handleConfirm}
+                                            disabled={savingInteraction}
+                                        >
+                                            {savingInteraction ? (
+                                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                    <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+                                                    <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
+                                                        💾 Saving...
+                                                    </Text>
+                                                </View>
+                                            ) : (
+                                                <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
+                                                    ✅ Confirm This Plant
+                                                </Text>
+                                            )}
+                                        </TouchableOpacity>
+                                    )}
+
+                                    <TouchableOpacity
+                                        style={{
+                                            backgroundColor: '#f3f4f6',
+                                            padding: 16,
+                                            borderRadius: 8,
+                                            alignItems: 'center'
+                                        }}
+                                        onPress={() => setShowCustomQuestion(true)}
+                                    >
+                                        <Text style={{ color: '#374151', fontSize: 16, fontWeight: '600' }}>
+                                            🤖 Ask AI for Better Match
+                                        </Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={{
+                                            backgroundColor: '#f3f4f6',
+                                            padding: 12,
+                                            borderRadius: 8,
+                                            alignItems: 'center'
+                                        }}
+                                        onPress={() => {
+                                            setShowRefinedResult(false);
+                                            setShowPersonalDescription(false);
+                                        }}
+                                    >
+                                        <Text style={{ color: '#374151', fontSize: 14, fontWeight: '600' }}>
+                                            ← Back to Questions
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
                             </View>
-                        </View>
-                    )}
-                </ScrollView>
-            </View>
+                        )}
+
+                        {/* Custom Question Input */}
+                        {showCustomQuestion && (
+                            <View style={{ 
+                                backgroundColor: 'white', 
+                                borderRadius: 12, 
+                                padding: 20,
+                                marginTop: 20,
+                                shadowColor: '#000',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.1,
+                                shadowRadius: 4,
+                                elevation: 3
+                            }}>
+                                <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 12 }}>
+                                    🤖 Describe What You See
+                                </Text>
+                                <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>
+                                    Tell the AI about specific features you notice that might help identify the plant better.
+                                </Text>
+                                
+                                <TextInput
+                                    style={{
+                                        borderWidth: 1,
+                                        borderColor: '#d1d5db',
+                                        borderRadius: 8,
+                                        padding: 12,
+                                        fontSize: 14,
+                                        color: '#374151',
+                                        backgroundColor: '#f9fafb',
+                                        minHeight: 80,
+                                        textAlignVertical: 'top'
+                                    }}
+                                    placeholder="e.g., The leaves have tiny hairs, the flowers are bright yellow, it grows in clusters..."
+                                    value={customQuestion}
+                                    onChangeText={setCustomQuestion}
+                                    multiline
+                                />
+                                
+                                <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+                                    <TouchableOpacity
+                                        style={{
+                                            flex: 1,
+                                            backgroundColor: '#059669',
+                                            padding: 12,
+                                            borderRadius: 8,
+                                            alignItems: 'center'
+                                        }}
+                                        onPress={handleRequestBetter}
+                                    >
+                                        <Text style={{ color: 'white', fontSize: 14, fontWeight: '600' }}>
+                                            🔍 Find Better Match
+                                        </Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={{
+                                            flex: 1,
+                                            backgroundColor: '#f3f4f6',
+                                            padding: 12,
+                                            borderRadius: 8,
+                                            alignItems: 'center'
+                                        }}
+                                        onPress={() => setShowCustomQuestion(false)}
+                                    >
+                                        <Text style={{ color: '#374151', fontSize: 14, fontWeight: '600' }}>
+                                            Cancel
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        )}
+                    </ScrollView>
+                </View>
+            </KeyboardAvoidingView>
         </Modal>
     );
 } 

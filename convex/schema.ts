@@ -65,10 +65,12 @@ export default defineSchema({
     content: v.string(),
     timestamp: v.number(),
     parentMessageId: v.optional(v.string()),
-    editedAt: v.optional(v.number()), // Temporary field for old data
-    isEdited: v.optional(v.boolean()), // Temporary field for old data
+    chatType: v.optional(v.string()), // "qa" or "general"
+    editedAt: v.optional(v.number()),
+    isEdited: v.optional(v.boolean()),
   })
   .index("plantId", ["plantId"])
   .index("messageId", ["messageId"])
   .index("sightingId", ["sightingId"])
+  .index("chatType", ["chatType"])
 });

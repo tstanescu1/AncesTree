@@ -58,7 +58,8 @@ export default function PlantChatView({ plantId, sightingId, plantName, onClose 
   
   const messages = useQuery(api.chatSystem.getChatMessages, { 
     plantId, 
-    sightingId 
+    sightingId,
+    chatType: "general"
   });
 
   // Polling for streaming updates
@@ -117,6 +118,7 @@ export default function PlantChatView({ plantId, sightingId, plantName, onClose 
         sightingId,
         content,
         messageId,
+        chatType: "general"
       });
       
       // Set the AI message ID for polling
@@ -143,6 +145,7 @@ export default function PlantChatView({ plantId, sightingId, plantName, onClose 
         plantId,
         messageId: editingMessageId,
         newContent: editingText.trim(),
+        chatType: "general"
       });
       
       // Set the AI message ID for polling if there's a new AI response
@@ -167,6 +170,7 @@ export default function PlantChatView({ plantId, sightingId, plantName, onClose 
       await deleteMessage({
         plantId,
         messageId: messageToDelete,
+        chatType: "general"
       });
     } catch (error) {
       console.error('Error deleting message:', error);
@@ -268,10 +272,10 @@ export default function PlantChatView({ plantId, sightingId, plantName, onClose 
         >
           {messages?.map(renderMessage)}
           {/* Streaming placeholder */}
-          {isLoading && (
+          {isLoading && !streamedResponse && (
             <View style={[styles.messageRow, styles.aiRow]}>
               <View style={[styles.messageBubble, styles.aiBubble]}>
-                <Text style={styles.typingText}>Taita is thinking...</Text>
+                <Text style={styles.typingText}>Taita is thinking... 🤔</Text>
                 {streamedResponse && (
                   <Markdown style={markdownAIStyles as any}>{streamedResponse}</Markdown>
                 )}
