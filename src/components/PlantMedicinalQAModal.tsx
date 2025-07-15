@@ -307,23 +307,6 @@ export default function PlantMedicinalQAModal({
                             )}
                         </View>
 
-                        {/* Current Streaming Answer - Only show when streaming */}
-                        {isStreaming && (
-                            <View style={{ backgroundColor: 'white', borderRadius: 12, borderWidth: 1, borderColor: '#bbf7d0', padding: 16, marginBottom: 16 }}>
-                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#166534' }}>Taita is responding...</Text>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                        <ActivityIndicator size="small" color="#059669" style={{ marginRight: 8 }} />
-                                        <Text style={{ fontSize: 12, color: '#059669' }}>Streaming</Text>
-                                    </View>
-                                </View>
-                                <Text style={{ fontSize: 13, color: '#374151', marginTop: 8, marginBottom: 4 }}>Q: {question}</Text>
-                                <Text style={{ fontSize: 14, color: '#6b7280', fontStyle: 'italic' }}>
-                                    Taita is gathering wisdom...
-                                </Text>
-                            </View>
-                        )}
-
                         {/* Previous Q&A */}
                         {qaPairs.slice(0, -1).length > 0 && (
                             <View style={{ marginBottom: 16 }}>
@@ -376,22 +359,33 @@ export default function PlantMedicinalQAModal({
                             </View>
                         )}
 
-                        {/* Latest Q&A with edit/delete */}
+                        {/* Latest Q&A with edit/delete - Show always, with loading state when streaming */}
                         {latestQA && (
                             <View style={{ backgroundColor: 'white', borderRadius: 12, borderWidth: 1, borderColor: '#bbf7d0', padding: 16, marginBottom: 16 }}>
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#166534' }}>Latest Answer</Text>
-                                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                                        <TouchableOpacity onPress={() => handleEditQA(latestQA)}>
-                                            <Text style={{ color: '#059669', fontWeight: '600' }}>Edit</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity onPress={() => handleDeleteQA(latestQA)}>
-                                            <Text style={{ color: '#dc2626', fontWeight: '600' }}>Delete</Text>
-                                        </TouchableOpacity>
-                                    </View>
+                                    {!isStreaming && (
+                                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                                            <TouchableOpacity onPress={() => handleEditQA(latestQA)}>
+                                                <Text style={{ color: '#059669', fontWeight: '600' }}>Edit</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity onPress={() => handleDeleteQA(latestQA)}>
+                                                <Text style={{ color: '#dc2626', fontWeight: '600' }}>Delete</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
                                 </View>
                                 <Text style={{ fontSize: 13, color: '#374151', marginTop: 8, marginBottom: 4 }}>Q: {latestQA.question}</Text>
-                                <Markdown style={{ body: { fontSize: 14, color: '#1e3a8a' } }}>{latestQA.answer}</Markdown>
+                                {isStreaming ? (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+                                        <ActivityIndicator size="small" color="#059669" style={{ marginRight: 8 }} />
+                                        <Text style={{ fontSize: 14, color: '#6b7280', fontStyle: 'italic' }}>
+                                            Generating response...
+                                        </Text>
+                                    </View>
+                                ) : (
+                                    <Markdown style={{ body: { fontSize: 14, color: '#1e3a8a' } }}>{latestQA.answer}</Markdown>
+                                )}
                             </View>
                         )}
                     </ScrollView>

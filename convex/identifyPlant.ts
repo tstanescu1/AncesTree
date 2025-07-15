@@ -104,7 +104,7 @@ export const identifyPlant = action({
           scientificName,
           commonNames,
           probability,
-          description: description.substring(0, 200) + (description.length > 200 ? "..." : ""),
+          description: description.substring(0, 400) + (description.length > 400 ? "..." : ""),
           wikiUrl,
           imageUrl: webImageUrl || similar_images[0] || "",
           similar_images: uniqueSimilarImages,
@@ -209,7 +209,7 @@ export const identifyPlantWithMultiplePhotos = action({
     scientificName, 
     commonNames, 
           probability,
-          description: description.substring(0, 200) + (description.length > 200 ? "..." : ""),
+          description: description.substring(0, 400) + (description.length > 400 ? "..." : ""),
     wikiUrl, 
           imageUrl: webImageUrl || similar_images[0] || "",
           similar_images: uniqueSimilarImages,
@@ -442,89 +442,7 @@ Be precise with scientific names and realistic with probability scores (0-100).`
   },
 });
 
-// Extract medicinal properties using AI
-async function extractMedicinalProperties(scientificName: string, description: string): Promise<string[]> {
-  console.log(`🔍 Extracting medicinal properties for: ${scientificName}`);
 
-  try {
-    if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.includes('sk-proj-kJmPBD')) {
-      console.log("🌿 OpenAI API key not available, returning empty array");
-      return [];
-    }
-
-    const standardTagsList = STANDARD_MEDICINAL_TAGS.join(', ');
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "system",
-            content: `You are a botanical expert specializing in traditional medicine. Extract medicinal properties and return them as a JSON array of strings.
-
-PREFERRED STANDARD TAGS (use these when possible):
-${standardTagsList}
-
-Guidelines:
-- Use standard tags from the list above when applicable
-- Use hyphens instead of spaces (e.g., "anti-inflammatory")
-- Be specific but concise
-- Return only 3-6 most relevant properties
-- Return ONLY a JSON array, nothing else
-- Include consciousness-altering properties when relevant
-
-Example: ["anti-inflammatory", "digestive-aid", "consciousness-expanding"]`
-          },
-          {
-            role: "user",
-            content: `Plant: ${scientificName}\nDescription: ${description}\n\nExtract medicinal properties as a JSON array of standardized tags.`
-          }
-        ],
-        temperature: 0.2,
-        max_tokens: 150
-      }),
-    });
-
-    const data = await response.json();
-    
-    if (!response.ok) {
-      console.error(`❌ OpenAI API Error:`, data);
-      return [];
-    }
-
-    try {
-      const content = data.choices[0].message.content;
-      
-      let jsonString = content.trim();
-      if (jsonString.startsWith("```")) {
-        jsonString = jsonString.replace(/^```[a-zA-Z]*\n?/, "");
-        jsonString = jsonString.replace(/```$/, "");
-      }
-      const rawProperties = JSON.parse(jsonString);
-      
-      if (!Array.isArray(rawProperties)) {
-        console.warn(`⚠️ OpenAI returned non-array:`, rawProperties);
-        return [];
-      }
-      
-      const standardizedTags = normalizeAndStandardizeTags(rawProperties);
-      console.log(`🏷️ Standardized tags:`, standardizedTags);
-      
-      return standardizedTags;
-    } catch (parseError) {
-      console.error(`❌ Failed to parse OpenAI response:`, parseError);
-      return [];
-    }
-  } catch (error) {
-    console.error(`❌ Error calling OpenAI:`, error);
-    return [];
-  }
-}
 
 // Confirm and store user's selected plant - Force deployment with new schema
 export const confirmPlantSelection = action({
@@ -570,7 +488,9 @@ export const confirmPlantSelection = action({
     const commonNames = selectedSuggestion.commonNames || [];
 
 
-    const medicinalTags = await extractMedicinalProperties(scientificName, description || "");
+    // Extract comprehensive medicinal data
+    const comprehensiveData = await extractComprehensiveMedicinalData(scientificName, description || "", "");
+    const medicinalTags = comprehensiveData.medicinalTags;
 
     // Prepare user photos array
     const photosToStore = [];
@@ -585,17 +505,21 @@ export const confirmPlantSelection = action({
       commonNames: commonNames || [],
       wikiUrl,
       medicinalTags,
-      traditionalUsage: '',
+      traditionalUsage: comprehensiveData.traditionalUsage,
       imageUrl,
       userPhotos: photosToStore,
       similar_images,
       description,
       location,
       pests: [],
+      // Store comprehensive medicinal data
+      preparationMethods: comprehensiveData.preparationMethods,
+      partsUsed: comprehensiveData.partsUsed,
+      medicinalUses: comprehensiveData.medicinalUses,
       medicinalDetails: medicinalDetails || {
-        medicinalUses: [],
-        preparationMethods: [],
-        partsUsed: [],
+        medicinalUses: comprehensiveData.medicinalUses,
+        preparationMethods: comprehensiveData.preparationMethods,
+        partsUsed: comprehensiveData.partsUsed,
         dosageNotes: '',
         sourceAttribution: 'AI-generated from botanical descriptions',
         userExperience: ''
@@ -627,6 +551,9 @@ export const storePlantData = internalMutation({
       timestamp: v.number()
     })),
     pests: v.optional(v.array(v.string())),
+    preparationMethods: v.optional(v.array(v.string())),
+    partsUsed: v.optional(v.array(v.string())),
+    medicinalUses: v.optional(v.array(v.string())),
     medicinalDetails: v.optional(v.object({
       medicinalUses: v.optional(v.array(v.string())),
       preparationMethods: v.optional(v.array(v.string())),
@@ -648,6 +575,9 @@ export const storePlantData = internalMutation({
     description, 
     location, 
     pests, 
+    preparationMethods,
+    partsUsed,
+    medicinalUses,
     medicinalDetails 
   }) => {
     // Upsert into plants table
@@ -663,10 +593,14 @@ export const storePlantData = internalMutation({
         commonNames: commonNames || existingPlant.commonNames,
         wikiUrl,
         medicinalTags,
-        traditionalUsage,
+        traditionalUsage: traditionalUsage || "",
         imageUrl,
         similar_images: similar_images || existingPlant.similar_images,
         pests: pests || existingPlant.pests,
+        // Always update comprehensive data when provided, don't use || operator
+        preparationMethods: preparationMethods,
+        partsUsed: partsUsed,
+        medicinalUses: medicinalUses,
       });
     } else {
       const allImages = imageUrl && similar_images 
@@ -678,11 +612,14 @@ export const storePlantData = internalMutation({
         commonNames: commonNames || [],
         wikiUrl,
         medicinalTags,
-        traditionalUsage,
+        traditionalUsage: traditionalUsage || "",
         imageUrl,
         createdAt: Date.now(),
         similar_images: allImages,
         pests: pests || [],
+        preparationMethods: preparationMethods || [],
+        partsUsed: partsUsed || [],
+        medicinalUses: medicinalUses || [],
       });
     }
 
@@ -1949,6 +1886,7 @@ export const reExtractComprehensiveData = action({
       preparationMethods: string[];
       partsUsed: string[];
       medicinalUses: string[];
+      traditionalUsage: string;
       description: string;
     };
   }> => {
@@ -1957,19 +1895,255 @@ export const reExtractComprehensiveData = action({
       throw new Error("Plant not found");
     }
     
-    // Simple re-extraction
-    const medicinalTags = await extractMedicinalProperties(plant.scientificName, plant.traditionalUsage || "");
+    console.log(`🔍 Re-extracting comprehensive data for: ${plant.scientificName}`);
     
-    return { 
-      success: true, 
-      message: `Updated ${plant.scientificName}`,
-      data: {
-        medicinalTags,
+    try {
+      // Extract comprehensive medicinal data using AI
+      const comprehensiveData = await extractComprehensiveMedicinalData(
+        plant.scientificName, 
+        plant.description || "", 
+        plant.traditionalUsage || ""
+      );
+      
+      // Update the plant with the new data
+      await ctx.runMutation(internal.identifyPlant.updatePlantWithComprehensiveData, {
+        plantId,
+        medicinalTags: comprehensiveData.medicinalTags,
+        preparationMethods: comprehensiveData.preparationMethods,
+        partsUsed: comprehensiveData.partsUsed,
+        medicinalUses: comprehensiveData.medicinalUses,
+        traditionalUsage: comprehensiveData.traditionalUsage,
+      });
+      
+      console.log(`✅ Successfully updated ${plant.scientificName} with comprehensive data`);
+      
+      return { 
+        success: true, 
+        message: `Updated ${plant.scientificName} with comprehensive medicinal data`,
+        data: {
+          medicinalTags: comprehensiveData.medicinalTags,
+          preparationMethods: comprehensiveData.preparationMethods,
+          partsUsed: comprehensiveData.partsUsed,
+          medicinalUses: comprehensiveData.medicinalUses,
+          traditionalUsage: comprehensiveData.traditionalUsage,
+          description: plant.description || ""
+        }
+      };
+    } catch (error) {
+      console.error(`❌ Error extracting comprehensive data for ${plant.scientificName}:`, error);
+      return { 
+        success: false, 
+        message: `Failed to extract comprehensive data: ${error}`,
+        data: {
+          medicinalTags: [],
+          preparationMethods: [],
+          partsUsed: [],
+          medicinalUses: [],
+          traditionalUsage: "",
+          description: plant.description || ""
+        }
+      };
+    }
+  },
+});
+
+// Extract comprehensive medicinal data using AI
+async function extractComprehensiveMedicinalData(
+  scientificName: string, 
+  description: string, 
+  traditionalUsage: string
+): Promise<{
+  medicinalTags: string[];
+  preparationMethods: string[];
+  partsUsed: string[];
+  medicinalUses: string[];
+  traditionalUsage: string;
+}> {
+  console.log(`🔍 Extracting comprehensive medicinal data for: ${scientificName}`);
+
+  try {
+    if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.includes('sk-proj-kJmPBD')) {
+      console.log("🌿 OpenAI API key not available, returning empty data");
+      return {
+        medicinalTags: [],
         preparationMethods: [],
         partsUsed: [],
         medicinalUses: [],
-        description: plant.description || ""
+        traditionalUsage: ""
+      };
+    }
+
+    const standardTagsList = STANDARD_MEDICINAL_TAGS.join(', ');
+    const standardPreparationMethods = STANDARD_PREPARATION_METHODS.join(', ');
+    const standardPlantParts = STANDARD_PLANT_PARTS.join(', ');
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: `You are a botanical expert specializing in traditional medicine and practical plant uses. Extract comprehensive medicinal and traditional information and return it as a JSON object.
+
+PREFERRED STANDARD TAGS (use these when possible):
+${standardTagsList}
+
+PREFERRED PREPARATION METHODS (use these when possible):
+${standardPreparationMethods}
+
+PREFERRED PLANT PARTS (use these when possible):
+${standardPlantParts}
+
+Guidelines:
+- Use standard tags/methods/parts from the lists above when applicable
+- Use hyphens instead of spaces (e.g., "anti-inflammatory")
+- Be specific but concise
+- Return 3-8 most relevant medicinal uses
+- Return 2-5 preparation methods
+- Return 1-4 plant parts used
+- Return 3-6 medicinal properties
+- Return ONLY a JSON object, nothing else
+- Include consciousness-altering properties when relevant
+
+TRADITIONAL USAGE GUIDELINES:
+- Return the traditionalUsage field as well-organized Markdown
+- Use clear section headings (e.g., Preparation, Dosage, Practical Uses, Cultural Context)
+- Use bullet points and line breaks for readability
+- Separate each section with a heading (## Section Name)
+- Provide 2-3 sentences or bullet points per section
+- Include specific timing (e.g., "15-20 minutes", "1-2 times daily")
+- Mention dosage frequency when relevant
+- Include storage and application methods
+- Reference cultural context when appropriate
+- Focus on traditional preparation techniques
+- IMPORTANT: Include practical non-medicinal uses (soap-making, cleaning, crafts, etc.) when relevant
+- Explain the origin of common names when they relate to traditional uses (e.g., 'soapbush' is used for soap-making)
+
+MEDICINAL USES GUIDELINES:
+- Each use should be 1-2 sentences with specific details
+- Include preparation method, part used, and specific condition/benefit
+- Be informative but not overly verbose
+- Focus on traditional applications and modern understanding
+- Include dosage context when relevant (e.g., "small amounts", "diluted")
+- Include practical applications beyond medicine when relevant
+
+PRACTICAL USES PRIORITY:
+- If the plant has a common name that suggests a practical use (e.g., "soapbush", "soapwort"), prioritize explaining that use
+- Include traditional non-medicinal applications (cleaning, soap-making, fiber, dye, etc.)
+- Explain cultural significance and historical uses
+- Mention any unique properties that make it suitable for specific applications
+
+Example response format:
+{
+  "medicinalTags": ["anti-inflammatory", "digestive-aid", "soap-making", "cleaning-agent"],
+  "preparationMethods": ["tea-infusion", "tincture", "poultice", "soap-extraction"],
+  "partsUsed": ["leaves", "flowers", "roots", "sap"],
+  "medicinalUses": [
+    "Leaves prepared as tea infusion help reduce inflammation and soothe digestive discomfort, traditionally used for stomach upset and mild pain relief",
+    "Fresh leaves crushed into poultice applied topically for skin conditions, wounds, and localized inflammation with antimicrobial benefits",
+    "Root decoction consumed in small amounts for deeper anti-inflammatory effects and to support immune system function",
+    "Plant sap and crushed leaves used as natural soap substitute for cleaning and washing, giving rise to the common name 'soapbush'"
+  ],
+  "traditionalUsage": "## Preparation\n- Leaves are brewed as a tea for digestive issues and mild pain relief.\n- Bark is boiled for 15-20 minutes to create a decoction for anti-inflammatory effects.\n- Fresh leaves are crushed into a poultice for topical application.\n\n## Dosage & Frequency\n- Tea is typically consumed 1-2 times daily.\n- Poultices are applied and changed every 4-6 hours.\n\n## Practical Uses\n- The plant's saponin-rich sap and leaves are used for soap-making and cleaning.\n- Crushed leaves and stems are mixed with water to create a natural soap for washing clothes and personal hygiene.\n- This practical use is the origin of the common name 'soapbush'.\n\n## Cultural Context\n- Widely used in traditional medicine and daily life in tropical regions.\n- Indigenous communities value the plant for both its healing and cleaning properties."
+}`
+          },
+                      {
+              role: "user",
+              content: `Plant: ${scientificName}
+Description: ${description}
+Traditional Usage: ${traditionalUsage}
+
+Extract comprehensive medicinal information as a JSON object with medicinalTags, preparationMethods, partsUsed, medicinalUses, and traditionalUsage fields.`
+            }
+        ],
+        temperature: 0.3,
+        max_tokens: 800
+      }),
+    });
+
+    const data = await response.json();
+    
+    if (!response.ok) {
+      console.error(`❌ OpenAI API Error:`, data);
+      return {
+        medicinalTags: [],
+        preparationMethods: [],
+        partsUsed: [],
+        medicinalUses: [],
+        traditionalUsage: ""
+      };
+    }
+
+    try {
+      const content = data.choices[0].message.content;
+      
+      let jsonString = content.trim();
+      if (jsonString.startsWith("```")) {
+        jsonString = jsonString.replace(/^```[a-zA-Z]*\n?/, "");
+        jsonString = jsonString.replace(/```$/, "");
       }
+      
+      const extractedData = JSON.parse(jsonString);
+      
+      // Validate and standardize the data
+      const standardizedData = {
+        medicinalTags: normalizeAndStandardizeTags(extractedData.medicinalTags || []),
+        preparationMethods: extractedData.preparationMethods || [],
+        partsUsed: extractedData.partsUsed || [],
+        medicinalUses: extractedData.medicinalUses || [],
+        traditionalUsage: extractedData.traditionalUsage || ""
+      };
+      
+      console.log(`🏷️ Extracted comprehensive data:`, standardizedData);
+      
+      return standardizedData;
+    } catch (parseError) {
+      console.error(`❌ Failed to parse OpenAI response:`, parseError);
+      return {
+        medicinalTags: [],
+        preparationMethods: [],
+        partsUsed: [],
+        medicinalUses: [],
+        traditionalUsage: ""
+      };
+    }
+  } catch (error) {
+    console.error(`❌ Error calling OpenAI:`, error);
+    return {
+      medicinalTags: [],
+      preparationMethods: [],
+      partsUsed: [],
+      medicinalUses: [],
+      traditionalUsage: ""
     };
+  }
+}
+
+// Update plant with comprehensive data
+export const updatePlantWithComprehensiveData = internalMutation({
+  args: {
+    plantId: v.id("plants"),
+    medicinalTags: v.array(v.string()),
+    preparationMethods: v.array(v.string()),
+    partsUsed: v.array(v.string()),
+    medicinalUses: v.array(v.string()),
+    traditionalUsage: v.optional(v.string()),
+  },
+  handler: async (ctx, { plantId, medicinalTags, preparationMethods, partsUsed, medicinalUses, traditionalUsage }) => {
+    await ctx.db.patch(plantId, {
+      medicinalTags,
+      preparationMethods,
+      partsUsed,
+      medicinalUses,
+      traditionalUsage: traditionalUsage || "",
+    });
+    
+    console.log(`✅ Updated plant ${plantId} with comprehensive data`);
+    return { success: true };
   },
 });

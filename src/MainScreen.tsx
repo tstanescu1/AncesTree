@@ -688,7 +688,7 @@ Collected with AncesTree 🌿📱`;
             // Complete loading before navigating
             setLoading(false);
             
-            // Small delay to ensure state is updated, then navigate
+            // Longer delay to ensure comprehensive data is saved and query is invalidated
             setTimeout(() => {
                 // Debug log to check the value and type of plantId
                 console.log("DEBUG plantId", result.plantId, typeof result.plantId);
@@ -699,7 +699,18 @@ Collected with AncesTree 🌿📱`;
                 }
                 setSelectedPlantId(plantIdToSet);
                 setCurrentView('detail');
-            }, 100);
+                
+                // Force a refresh after a short delay to ensure comprehensive data is loaded
+                setTimeout(() => {
+                    if (plantIdToSet) {
+                        const currentId = plantIdToSet;
+                        setSelectedPlantId(null);
+                        setTimeout(() => {
+                            setSelectedPlantId(currentId);
+                        }, 200);
+                    }
+                }, 500);
+            }, 300);
             
         } catch (err) {
             Alert.alert("Error", "Failed to add plant to collection. Please try again.");
@@ -810,28 +821,21 @@ Collected with AncesTree 🌿📱`;
         if (selectedPlantId && !loading) {
             try {
                 setLoading(true);
-                const result = await extractAdvancedFields({ plantId: selectedPlantId as any });
-                console.log('Advanced fields update result:', result);
                 
-                if (result.success && result.updated) {
-                    // Force a refresh of the plant data by invalidating the query
-                    const currentId = selectedPlantId;
-                    setSelectedPlantId(null);
-                    
-                    // Wait for the query to be invalidated
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    
-                    // Set the ID back to trigger a fresh query
-                    setSelectedPlantId(currentId);
-                    
-                    // Wait for the new data to be loaded
-                    await new Promise(resolve => setTimeout(resolve, 900));
-                    
-                    setLoading(false);
-                } else {
-                    console.error('Failed to update advanced fields:', result);
-                    setLoading(false);
-                }
+                // Force a refresh of the plant data by invalidating the query
+                const currentId = selectedPlantId;
+                setSelectedPlantId(null);
+                
+                // Wait for the query to be invalidated
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Set the ID back to trigger a fresh query
+                setSelectedPlantId(currentId);
+                
+                // Wait for the new data to be loaded
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                setLoading(false);
             } catch (error) {
                 console.error('Failed to refresh plant data:', error);
                 setLoading(false);

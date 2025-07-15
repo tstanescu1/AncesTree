@@ -583,7 +583,7 @@ export default function PlantSuggestionsView({
                 )}
 
                 {/* Plant Info */}
-                <View style={{ paddingRight: 80 }}>
+                <View style={{ flex: 1, paddingRight: 16 }}>
                   <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#15803d', marginBottom: 4 }}>
                     {suggestion.commonNames[0] || suggestion.scientificName}
                   </Text>
@@ -618,7 +618,14 @@ export default function PlantSuggestionsView({
                     </Text>
                   )}
 
-                  <Text style={{ fontSize: 13, color: '#374151', lineHeight: 18 }}>
+                  <Text style={{ 
+                    fontSize: 14, 
+                    color: '#374151', 
+                    lineHeight: 20,
+                    textAlign: 'justify',
+                    marginBottom: 8,
+                    flex: 1
+                  }}>
                     {suggestion.description}
                   </Text>
                 </View>

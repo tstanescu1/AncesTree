@@ -1111,34 +1111,7 @@ export default function PlantDetailView({
                             </View>
                         )}
 
-                        {/* User's Medicinal Observations */}
-                        {plantDetail.allSightings && plantDetail.allSightings.some((s: any) => s.medicinalUses || s.preparationMethods || s.partsUsed || s.dosageNotes || s.sourceAttribution || s.userExperience) && (
-                            <View style={{ marginBottom: 16, padding: 12, backgroundColor: 'white', borderRadius: 8, borderWidth: 1, borderColor: '#bbf7d0' }}>
-                                <Text style={{ fontSize: 14, fontWeight: '600', color: '#166534', marginBottom: 12 }}>
-                                    📝 Your Medicinal Observations
-                                </Text>
-                                {plantDetail.allSightings.map((sighting: any, index: number) => (
-                                    (sighting.medicinalUses || sighting.preparationMethods || sighting.partsUsed || sighting.dosageNotes || sighting.sourceAttribution || sighting.userExperience) && (
-                                        <View key={index} style={{ marginBottom: 12, padding: 10, backgroundColor: '#f8fafc', borderRadius: 6, borderWidth: 1, borderColor: '#e2e8f0' }}>
-                                            <Text style={{ fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 6 }}>
-                                                Observation #{index + 1} - {new Date(sighting.identifiedAt).toLocaleDateString()}
-                                            </Text>
-                                            <PlantMedicinalDetailsView
-                                                details={{
-                                                    medicinalUses: sighting.medicinalUses || [],
-                                                    preparationMethods: sighting.preparationMethods || [],
-                                                    partsUsed: sighting.partsUsed || [],
-                                                    dosageNotes: sighting.dosageNotes || '',
-                                                    sourceAttribution: sighting.sourceAttribution || '',
-                                                    userExperience: sighting.userExperience || '',
-                                                }}
-                                                showEditButton={false}
-                                            />
-                                        </View>
-                                    )
-                                ))}
-                            </View>
-                        )}
+
 
                         {/* Add New Medicinal Observation Button */}
                         <TouchableOpacity
