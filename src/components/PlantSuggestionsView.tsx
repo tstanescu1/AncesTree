@@ -15,13 +15,15 @@ interface PlantSuggestion {
   wikiUrl: string;
   imageUrl?: string;
   similar_images: string[];
+  isAISuggestion?: boolean; // Added for visual distinction
+  aiPriority?: boolean; // Added for priority
 }
 
 interface PlantSuggestionsViewProps {
   suggestions: PlantSuggestion[];
   userPhotoBase64: string;
   onPlantSelected: (suggestion: PlantSuggestion, feedback?: string, location?: LocationData | null, medicinalDetails?: any) => void;
-  onRequestBetterIdentification: (userDescription: string, rejectedSuggestions: string[]) => void;
+      onRequestBetterIdentification: (userDescription: string, rejectedSuggestions: string[], contextAnswers?: Array<{question: string, answer: string}>) => void;
   onBackToCamera: () => void;
   onRejectionFeedback: (rejectedPlantName: string, allSuggestions: PlantSuggestion[]) => void;
   loading: boolean;
@@ -47,7 +49,6 @@ export default function PlantSuggestionsView({
   
   const [showRequestBetterModal, setShowRequestBetterModal] = useState(false);
   const [userDescription, setUserDescription] = useState('');
-  const [isLoading, setIsLoading] = useState(false); // For better identification
   const [rejectedSuggestions, setRejectedSuggestions] = useState<string[]>([]);
   const [visibleSuggestions, setVisibleSuggestions] = useState<PlantSuggestion[]>(suggestions);
   const [fadingOutSuggestions, setFadingOutSuggestions] = useState<Set<string>>(new Set());
@@ -58,6 +59,9 @@ export default function PlantSuggestionsView({
 
   // Combine parent loading with local loading states
   const isLoadingCombined = loading || localLoading || processingSelection;
+  
+  // Use parent loading state for AI analysis
+  const isAiLoading = loading;
 
   // Create refs for suggestion animations
   const suggestionAnimations = useRef<{ [key: string]: { opacity: Animated.Value; scale: Animated.Value } }>({});
@@ -188,7 +192,6 @@ export default function PlantSuggestionsView({
   const requestBetterIdentification = () => {
     if (!userDescription.trim()) return;
     
-    setIsLoading(true);
     setShowRequestBetterModal(false);
     
     // Call the parent function to request better identification
@@ -197,10 +200,7 @@ export default function PlantSuggestionsView({
     // Reset the description
     setUserDescription('');
     
-    // Reset loading state after a timeout (assuming parent handles the actual request)
-    setTimeout(() => {
-      setIsLoading(false);
-    }, 5000);
+    // Note: Loading state is managed by parent component
   };
 
   // Enhanced reset that completely clears all gesture state
@@ -701,17 +701,17 @@ export default function PlantSuggestionsView({
               alignItems: 'center',
               marginVertical: 20,
               borderWidth: 2,
-              borderColor: isLoadingCombined ? '#6b7280' : '#fbbf24',
-              opacity: isLoadingCombined ? 0.6 : 1,
+              borderColor: isAiLoading ? '#6b7280' : '#fbbf24',
+              opacity: isAiLoading ? 0.6 : 1,
             }}
             onPress={() => setShowRequestBetterModal(true)}
-            disabled={isLoadingCombined}
+            disabled={isAiLoading}
           >
             <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16, marginBottom: 4 }}>
-              {isLoadingCombined ? '🤖 Processing AI...' : '🤖 None of these look right?'}
+              {isAiLoading ? '🤖 Processing AI...' : '🤖 None of these look right?'}
             </Text>
             <Text style={{ color: '#fef3c7', fontSize: 12, textAlign: 'center' }}>
-              {isLoadingCombined ? 'Please wait...' : 'Get 5 AI-powered alternatives using GPT-4o vision analysis'}
+              {isAiLoading ? 'Please wait...' : 'Get 5 AI-powered alternatives using GPT-4o vision analysis'}
             </Text>
           </TouchableOpacity>
         )}
@@ -1081,21 +1081,21 @@ export default function PlantSuggestionsView({
               <TouchableOpacity
                 style={{
                     flex: 2,
-                    backgroundColor: isLoading ? '#9ca3af' : (userDescription.trim() ? '#f59e0b' : '#d1d5db'),
+                    backgroundColor: isAiLoading ? '#9ca3af' : (userDescription.trim() ? '#f59e0b' : '#d1d5db'),
                     paddingVertical: 14,
                   borderRadius: 8,
                   alignItems: 'center',
-                  opacity: isLoading ? 0.6 : 1,
+                  opacity: isAiLoading ? 0.6 : 1,
                 }}
                 onPress={requestBetterIdentification}
-                disabled={!userDescription.trim() || isLoading}
+                disabled={!userDescription.trim() || isAiLoading}
               >
                   <Text style={{ 
                     color: userDescription.trim() ? 'white' : '#9ca3af', 
                     fontWeight: '600',
                     fontSize: 13
                   }}>
-                    {isLoading ? '🔍 Finding better species matches...' : '🔍 Get 5 Alternative Suggestions'}
+                    {isAiLoading ? '🔍 Finding better species matches...' : '🔍 Get Suggestions'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1110,38 +1110,7 @@ export default function PlantSuggestionsView({
         </View>
       </Modal>
 
-      {/* Loading overlay for GPT-4o analysis */}
-      {isLoading && !showRequestBetterModal && (
-        <View style={{
-          position: 'absolute',
-          top: -100,
-          left: -100,
-          width: screenWidth + 200,
-          height: screenHeight + 200,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1000,
-        }}>
-          <View style={{
-            backgroundColor: 'white',
-            paddingVertical: 20,
-            paddingHorizontal: 24,
-            borderRadius: 12,
-            alignItems: 'center',
-            width: '80%',
-            maxWidth: 300,
-          }}>
-            <ActivityIndicator size="large" color="#f59e0b" />
-            <Text style={{ marginTop: 12, fontSize: 14, fontWeight: '600', color: '#92400e', textAlign: 'center' }}>
-              🔍 Finding alternative species matches...
-            </Text>
-            <Text style={{ marginTop: 4, fontSize: 12, color: '#78350f', textAlign: 'center' }}>
-              Analyzing photo & description for better results
-            </Text>
-          </View>
-        </View>
-      )}
+
 
       {/* Medicinal Details Modal */}
       <PlantMedicinalDetailsModal

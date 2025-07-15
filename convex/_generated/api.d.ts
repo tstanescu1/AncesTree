@@ -14,6 +14,8 @@ import type {
   FunctionReference,
 } from "convex/server";
 import type * as chatSystem from "../chatSystem.js";
+import type * as constants from "../constants.js";
+import type * as helpers from "../helpers.js";
 import type * as identifyPlant from "../identifyPlant.js";
 import type * as index from "../index.js";
 import type * as medicinalQA from "../medicinalQA.js";
@@ -28,6 +30,8 @@ import type * as medicinalQA from "../medicinalQA.js";
  */
 declare const fullApi: ApiFromModules<{
   chatSystem: typeof chatSystem;
+  constants: typeof constants;
+  helpers: typeof helpers;
   identifyPlant: typeof identifyPlant;
   index: typeof index;
   medicinalQA: typeof medicinalQA;

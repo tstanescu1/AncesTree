@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, Image, Modal, ScrollView, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { api } from "../../convex/_generated/api";
 import { useAction } from "convex/react";
@@ -9,7 +9,7 @@ interface PlantConfirmationModalProps {
     plantSuggestion: any;
     userPhotoBase64: string;
     onConfirm: (confirmedPlant: any) => void;
-    onRequestBetterIdentification: (userDescription: string, rejectedSuggestions: string[]) => void;
+    onRequestBetterIdentification: (userDescription: string, rejectedSuggestions: string[], contextAnswers?: Array<{question: string, answer: string}>) => void;
 }
 
 interface ConfirmationQuestion {
@@ -18,6 +18,8 @@ interface ConfirmationQuestion {
     options: string[];
     correctAnswer: string;
     reasoning: string;
+    tip?: string;
+    category?: string;
 }
 
 export default function PlantConfirmationModal({
@@ -35,16 +37,14 @@ export default function PlantConfirmationModal({
     const [confidence, setConfidence] = useState<number>(0);
     const [showCustomQuestion, setShowCustomQuestion] = useState(false);
     const [customQuestion, setCustomQuestion] = useState('');
-    const [showPersonalDescription, setShowPersonalDescription] = useState(false);
-    const [personalDescription, setPersonalDescription] = useState('');
-    const [refinedConfidence, setRefinedConfidence] = useState<number>(0);
-    const [showRefinedResult, setShowRefinedResult] = useState(false);
-    const [refinedAnalysis, setRefinedAnalysis] = useState<any>(null);
     const [savingInteraction, setSavingInteraction] = useState(false);
 
+    const scrollViewRef = useRef<ScrollView>(null);
+    const textInputRef = useRef<TextInput>(null);
+
     const generateConfirmationQuestions = useAction(api.identifyPlant.generateConfirmationQuestions);
-    const refineIdentificationWithDescription = useAction(api.identifyPlant.refineIdentificationWithDescription);
     const saveUserConfirmation = useAction(api.identifyPlant.saveUserConfirmation);
+    const testOpenAI = useAction(api.identifyPlant.testOpenAI);
 
     // Generate AI questions when modal opens
     useEffect(() => {
@@ -64,15 +64,49 @@ export default function PlantConfirmationModal({
             });
             
             console.log('📋 Generated questions:', result.questions);
-            setQuestions(result.questions);
+            
+            // Use the AI-generated questions instead of hardcoded ones
+            if (result.questions && result.questions.length > 0) {
+                // Ensure all questions have the required fields
+                const processedQuestions: ConfirmationQuestion[] = result.questions.map((q, index) => ({
+                    id: q.id || `question_${index + 1}`,
+                    question: q.question,
+                    options: q.options || [],
+                    correctAnswer: q.correctAnswer || '',
+                    reasoning: q.reasoning || `This question helps identify ${plantSuggestion.scientificName} based on its characteristics.`,
+                    category: 'general',
+                    tip: q.reasoning || `This question helps identify ${plantSuggestion.scientificName} based on its characteristics.`
+                }));
+                
+                setQuestions(processedQuestions);
+            } else {
+                // Fallback to basic questions if AI doesn't generate any
+                console.log('⚠️ No AI questions generated, using fallback questions');
+                const fallbackQuestions: ConfirmationQuestion[] = [
+                    {
+                        id: 'question_1',
+                        question: 'What does the plant look like?',
+                        options: [
+                            'I can see it clearly',
+                            'It\'s partially visible',
+                            'I can\'t see it well',
+                            'I haven\'t looked closely'
+                        ],
+                        correctAnswer: 'I can see it clearly',
+                        reasoning: `For ${plantSuggestion.scientificName}: This plant has distinctive features that should be visible in your photo.`,
+                        category: 'visual',
+                        tip: `For ${plantSuggestion.scientificName}: This plant has distinctive features that should be visible in your photo.`
+                    }
+                ];
+                setQuestions(fallbackQuestions);
+            }
+            
             setCurrentQuestionIndex(0);
             setUserAnswers({});
             setConfidence(0);
-            setShowPersonalDescription(false);
-            setShowRefinedResult(false);
         } catch (error) {
             console.error('Failed to generate confirmation questions:', error);
-            Alert.alert('Error', 'Failed to generate confirmation questions. Please try again.');
+            Alert.alert('Error', 'Failed to generate identification questions. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -87,7 +121,10 @@ export default function PlantConfirmationModal({
             setCurrentQuestionIndex(prev => prev + 1);
         } else {
             console.log('🏁 All questions answered, calculating confidence...');
-            calculateConfidence();
+            // Add a small delay to ensure state is updated before calculating
+            setTimeout(() => {
+                calculateConfidence();
+            }, 100);
         }
     };
 
@@ -99,7 +136,12 @@ export default function PlantConfirmationModal({
             const userAnswer = userAnswers[question.id];
             if (question.correctAnswer && userAnswer) {
                 totalQuestions++;
-                if (userAnswer === question.correctAnswer) {
+                // For identification questions, we'll use a more flexible scoring system
+                // First option is usually the most likely match, but other options can also be correct
+                if (userAnswer === question.correctAnswer || 
+                    userAnswer.includes("I can't tell") || 
+                    userAnswer.includes("I'm not sure") ||
+                    userAnswer.includes("I haven't")) {
                     correctAnswers++;
                 }
             }
@@ -128,14 +170,11 @@ export default function PlantConfirmationModal({
                 reasoning: q.reasoning
             }));
 
-            const finalConfidenceScore = refinedConfidence > 0 ? refinedConfidence : confidence;
-
             await saveUserConfirmation({
-                plantId: plantSuggestion._id,
+                plantId: plantSuggestion.plantId || undefined, // Use plantId if available (for existing plants)
                 scientificName: plantSuggestion.scientificName,
                 userAnswers: userAnswersData,
-                finalConfidence: finalConfidenceScore,
-                refinedAnalysis: refinedAnalysis || undefined,
+                finalConfidence: confidence,
                 userPhotoBase64: userPhotoBase64
             });
 
@@ -152,32 +191,49 @@ export default function PlantConfirmationModal({
     };
 
     const handleRequestBetter = () => {
-        const userDescription = customQuestion || `I'm not sure this is ${plantSuggestion?.scientificName || 'this plant'}. ${questions.map(q => q.question).join(' ')}`;
-        onRequestBetterIdentification(userDescription, plantSuggestion?.scientificName ? [plantSuggestion.scientificName] : []);
-        onClose();
-    };
-
-    const handleRefineWithDescription = async () => {
-        if (!personalDescription.trim()) return;
+        // Build a comprehensive description using all the collected information
+        let comprehensiveDescription = `I'm trying to identify a plant that was initially suggested as ${plantSuggestion?.scientificName}. `;
         
-        setLoading(true);
-        try {
-            const result = await refineIdentificationWithDescription({
-                scientificName: plantSuggestion.scientificName,
-                userDescription: personalDescription,
-                currentConfidence: confidence,
-                userPhotoBase64: userPhotoBase64
+        // Add user's answers to the identification questions
+        if (Object.keys(userAnswers).length > 0) {
+            comprehensiveDescription += `\n\nBased on my observations:\n`;
+            questions.forEach(question => {
+                const userAnswer = userAnswers[question.id];
+                if (userAnswer) {
+                    comprehensiveDescription += `• ${question.question} ${userAnswer}\n`;
+                }
             });
-            
-            setRefinedConfidence(result.refinedConfidence);
-            setRefinedAnalysis(result);
-            setShowRefinedResult(true);
-        } catch (error) {
-            console.error('Failed to refine identification:', error);
-            Alert.alert('Error', 'Failed to refine identification. Please try again.');
-        } finally {
-            setLoading(false);
         }
+        
+        // Add custom question if provided
+        if (customQuestion && customQuestion.trim()) {
+            comprehensiveDescription += `\n\nAdditional details: ${customQuestion}`;
+        }
+        
+        // Add confidence level
+        comprehensiveDescription += `\n\nConfidence level from previous questions: ${Math.round(confidence)}%`;
+        
+        // Add what doesn't match
+        if (confidence < 70) {
+            comprehensiveDescription += `\n\nThe suggested plant doesn't seem to match well based on my observations.`;
+        }
+        
+        // Add photo context
+        comprehensiveDescription += `\n\nI have a photo of the plant that I can share for identification.`;
+        
+        console.log('🔍 Requesting better match with comprehensive context:', comprehensiveDescription);
+        
+        // Convert user answers to context format
+        const contextAnswers = Object.entries(userAnswers).map(([questionId, answer]) => {
+            const question = questions.find(q => q.id === questionId);
+            return {
+                question: question?.question || questionId,
+                answer: answer
+            };
+        });
+        
+        onRequestBetterIdentification(comprehensiveDescription, plantSuggestion?.scientificName ? [plantSuggestion.scientificName] : [], contextAnswers);
+        onClose();
     };
 
     const currentQuestion = questions[currentQuestionIndex];
@@ -189,7 +245,11 @@ export default function PlantConfirmationModal({
 
     return (
         <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-            <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <KeyboardAvoidingView 
+                style={{ flex: 1 }} 
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+            >
                 <View style={{ flex: 1, backgroundColor: '#f0fdf4' }}>
                     {/* Header */}
                     <View style={{ 
@@ -211,7 +271,14 @@ export default function PlantConfirmationModal({
                         </TouchableOpacity>
                     </View>
 
-                    <ScrollView style={{ flex: 1, padding: 20 }}>
+                    <ScrollView 
+                        ref={scrollViewRef}
+                        style={{ flex: 1, padding: 20 }}
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={{ paddingBottom: 100 }}
+                    >
+
                         {/* Plant Info */}
                         <View style={{ 
                             backgroundColor: 'white', 
@@ -267,7 +334,7 @@ export default function PlantConfirmationModal({
                         )}
 
                         {/* Questions */}
-                        {!loading && questions.length > 0 && currentQuestion && confidence === 0 && !showPersonalDescription && !showRefinedResult && (
+                        {!loading && questions.length > 0 && currentQuestion && confidence === 0 && (
                             <View style={{ 
                                 backgroundColor: 'white', 
                                 borderRadius: 12, 
@@ -281,7 +348,7 @@ export default function PlantConfirmationModal({
                             }}>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
                                     <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', flex: 1 }}>
-                                        Question {currentQuestionIndex + 1} of {questions.length}
+                                        Question {currentQuestionIndex + 1}/{questions.length} for plant ID
                                     </Text>
                                     <View style={{ 
                                         backgroundColor: '#f0fdf4', 
@@ -290,7 +357,7 @@ export default function PlantConfirmationModal({
                                         borderRadius: 12 
                                     }}>
                                         <Text style={{ fontSize: 12, color: '#059669', fontWeight: '600' }}>
-                                            AI-Powered
+                                            🔍 ID Helper
                                         </Text>
                                     </View>
                                 </View>
@@ -299,8 +366,8 @@ export default function PlantConfirmationModal({
                                     {currentQuestion.question}
                                 </Text>
 
-                                <View style={{ gap: 12 }}>
-                                    {currentQuestion.options.map((option, index) => (
+                                <View style={{ gap: 12, marginBottom: 20 }}>
+                                    {currentQuestion.options && currentQuestion.options.length > 0 && currentQuestion.options.map((option, index) => (
                                         <TouchableOpacity
                                             key={index}
                                             style={{
@@ -323,9 +390,10 @@ export default function PlantConfirmationModal({
                                     ))}
                                 </View>
 
+
                                 {currentQuestion.reasoning && (
                                     <View style={{ 
-                                        marginTop: 16, 
+                                        marginTop: 6, 
                                         padding: 12, 
                                         backgroundColor: '#fef3c7', 
                                         borderRadius: 8 
@@ -339,7 +407,7 @@ export default function PlantConfirmationModal({
                         )}
 
                         {/* Confidence Result */}
-                        {confidence > 0 && !showPersonalDescription && !showRefinedResult && (
+                        {confidence > 0 && (
                             <View style={{ 
                                 backgroundColor: 'white', 
                                 borderRadius: 12, 
@@ -348,34 +416,42 @@ export default function PlantConfirmationModal({
                                 shadowOffset: { width: 0, height: 2 },
                                 shadowOpacity: 0.1,
                                 shadowRadius: 4,
-                                elevation: 3
+                                elevation: 3,
+                                marginBottom: 30
                             }}>
-                                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#166534', marginBottom: 16 }}>
-                                    🎯 Confirmation Result
-                                </Text>
-                                
-                                <View style={{ 
-                                    backgroundColor: confidence >= 70 ? '#f0fdf4' : confidence >= 40 ? '#fef3c7' : '#fef2f2',
-                                    padding: 16,
-                                    borderRadius: 8,
-                                    marginBottom: 20
-                                }}>
-                                    <Text style={{ 
-                                        fontSize: 16, 
-                                        fontWeight: '600',
-                                        color: confidence >= 70 ? '#059669' : confidence >= 40 ? '#d97706' : '#dc2626',
-                                        marginBottom: 8
+                                <View style={{ alignItems: 'center', marginBottom: 20 }}>
+                                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#166534', marginBottom: 8 }}>
+                                        Identification Confidence
+                                    </Text>
+                                    <View style={{
+                                        width: 80,
+                                        height: 80,
+                                        borderRadius: 40,
+                                        backgroundColor: confidence >= 70 ? '#dcfce7' : confidence >= 40 ? '#fef3c7' : '#fee2e2',
+                                        justifyContent: 'center',
+                                        alignItems: 'center',
+                                        borderWidth: 4,
+                                        borderColor: confidence >= 70 ? '#16a34a' : confidence >= 40 ? '#f59e0b' : '#dc2626'
                                     }}>
-                                        Confidence: {Math.round(confidence)}%
-                                    </Text>
-                                    <Text style={{ fontSize: 14, color: '#6b7280' }}>
-                                        {confidence >= 70 ? '✅ High confidence - This appears to be the correct identification' :
-                                         confidence >= 40 ? '⚠️ Medium confidence - Some features match but there may be alternatives' :
-                                         '❌ Low confidence - This may not be the correct plant'}
-                                    </Text>
+                                        <Text style={{ 
+                                            fontSize: 18, 
+                                            fontWeight: 'bold',
+                                            color: confidence >= 70 ? '#166534' : confidence >= 40 ? '#92400e' : '#991b1b'
+                                        }}>
+                                            {Math.round(confidence)}%
+                                        </Text>
+                                    </View>
                                 </View>
 
-                                {/* Action Buttons */}
+                                <Text style={{ fontSize: 16, color: '#374151', textAlign: 'center', marginBottom: 20, lineHeight: 24 }}>
+                                    {confidence >= 70 
+                                        ? `Great! Your answers suggest this is likely ${plantSuggestion?.commonNames?.[0] || plantSuggestion?.scientificName}.`
+                                        : confidence >= 40
+                                        ? `There's some uncertainty. Let's get more details to be sure about this identification.`
+                                        : `The identification doesn't seem to match well. Let's try a different approach.`
+                                    }
+                                </Text>
+
                                 <View style={{ gap: 12 }}>
                                     {confidence >= 70 && (
                                         <TouchableOpacity
@@ -403,25 +479,6 @@ export default function PlantConfirmationModal({
                                         </TouchableOpacity>
                                     )}
 
-                                    {confidence < 70 && (
-                                        <TouchableOpacity
-                                            style={{
-                                                backgroundColor: '#0ea5e9',
-                                                padding: 16,
-                                                borderRadius: 8,
-                                                alignItems: 'center'
-                                            }}
-                                            onPress={() => setShowPersonalDescription(true)}
-                                        >
-                                            <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
-                                                🔍 Refine with More Details
-                                            </Text>
-                                            <Text style={{ color: '#bae6fd', fontSize: 12, marginTop: 4 }}>
-                                                Tell us more about what you see
-                                            </Text>
-                                        </TouchableOpacity>
-                                    )}
-
                                     <TouchableOpacity
                                         style={{
                                             backgroundColor: '#f3f4f6',
@@ -432,282 +489,7 @@ export default function PlantConfirmationModal({
                                         onPress={() => setShowCustomQuestion(true)}
                                     >
                                         <Text style={{ color: '#374151', fontSize: 16, fontWeight: '600' }}>
-                                            🤖 Ask AI for Better Match
-                                        </Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-                        )}
-
-                        {/* Personal Description Input */}
-                        {showPersonalDescription && (
-                            <View style={{ 
-                                backgroundColor: 'white', 
-                                borderRadius: 12, 
-                                padding: 20,
-                                marginTop: 20,
-                                shadowColor: '#000',
-                                shadowOffset: { width: 0, height: 2 },
-                                shadowOpacity: 0.1,
-                                shadowRadius: 4,
-                                elevation: 3
-                            }}>
-                                <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 12 }}>
-                                    🔍 Help Us Refine the Identification
-                                </Text>
-                                <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>
-                                    Current confidence: {Math.round(confidence)}%. Tell us more about what you observe to help us determine if this is the right plant or suggest a better match.
-                                </Text>
-                                
-                                <TextInput
-                                    style={{
-                                        borderWidth: 1,
-                                        borderColor: '#d1d5db',
-                                        borderRadius: 8,
-                                        padding: 12,
-                                        fontSize: 14,
-                                        color: '#374151',
-                                        backgroundColor: '#f9fafb',
-                                        minHeight: 100,
-                                        textAlignVertical: 'top'
-                                    }}
-                                    placeholder="e.g., The leaves are much smaller than shown, the flowers are a different color, it smells like mint when crushed, it grows in a different pattern..."
-                                    value={personalDescription}
-                                    onChangeText={setPersonalDescription}
-                                    multiline
-                                />
-                                
-                                <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
-                                    <TouchableOpacity
-                                        style={{
-                                            flex: 1,
-                                            backgroundColor: '#059669',
-                                            padding: 12,
-                                            borderRadius: 8,
-                                            alignItems: 'center'
-                                        }}
-                                        onPress={handleRefineWithDescription}
-                                        disabled={!personalDescription.trim() || loading}
-                                    >
-                                        <Text style={{ color: 'white', fontSize: 14, fontWeight: '600' }}>
-                                            {loading ? '🔍 Analyzing...' : '🔍 Refine'}
-                                        </Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={{
-                                            flex: 1,
-                                            backgroundColor: '#f3f4f6',
-                                            padding: 12,
-                                            borderRadius: 8,
-                                            alignItems: 'center'
-                                        }}
-                                        onPress={() => setShowPersonalDescription(false)}
-                                    >
-                                        <Text style={{ color: '#374151', fontSize: 14, fontWeight: '600' }}>
-                                            Cancel
-                                        </Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-                        )}
-
-                        {/* Refined Result */}
-                        {showRefinedResult && refinedAnalysis && (
-                            <View style={{ 
-                                backgroundColor: 'white', 
-                                borderRadius: 12, 
-                                padding: 20,
-                                marginTop: 20,
-                                shadowColor: '#000',
-                                shadowOffset: { width: 0, height: 2 },
-                                shadowOpacity: 0.1,
-                                shadowRadius: 4,
-                                elevation: 3
-                            }}>
-                                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#166534', marginBottom: 16 }}>
-                                    🎯 Detailed Analysis Result
-                                </Text>
-                                
-                                {/* Confidence Summary */}
-                                <View style={{ 
-                                    backgroundColor: refinedConfidence >= 70 ? '#f0fdf4' : refinedConfidence >= 40 ? '#fef3c7' : '#fef2f2',
-                                    padding: 16,
-                                    borderRadius: 8,
-                                    marginBottom: 20
-                                }}>
-                                    <Text style={{ 
-                                        fontSize: 16, 
-                                        fontWeight: '600',
-                                        color: refinedConfidence >= 70 ? '#059669' : refinedConfidence >= 40 ? '#d97706' : '#dc2626',
-                                        marginBottom: 8
-                                    }}>
-                                        Refined Confidence: {Math.round(refinedConfidence)}%
-                                    </Text>
-                                    {refinedAnalysis.confidenceExplanation && (
-                                        <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 8, fontStyle: 'italic' }}>
-                                            {refinedAnalysis.confidenceExplanation}
-                                        </Text>
-                                    )}
-                                </View>
-
-                                {/* Detailed Analysis */}
-                                <ScrollView style={{ maxHeight: 400 }}>
-                                    {/* Detailed Reasoning */}
-                                    {refinedAnalysis.detailedReasoning && (
-                                        <View style={{ marginBottom: 16 }}>
-                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 8 }}>
-                                                📝 Analysis Summary
-                                            </Text>
-                                            <Text style={{ fontSize: 13, color: '#6b7280', lineHeight: 18 }}>
-                                                {refinedAnalysis.detailedReasoning}
-                                            </Text>
-                                        </View>
-                                    )}
-
-                                    {/* Matching Features */}
-                                    {refinedAnalysis.matchingFeatures && refinedAnalysis.matchingFeatures.length > 0 && (
-                                        <View style={{ marginBottom: 16 }}>
-                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#059669', marginBottom: 8 }}>
-                                                ✅ Matching Features
-                                            </Text>
-                                            {refinedAnalysis.matchingFeatures.map((feature: string, index: number) => (
-                                                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                                                    <Text style={{ fontSize: 12, color: '#059669', marginRight: 8 }}>•</Text>
-                                                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>{feature}</Text>
-                                                </View>
-                                            ))}
-                                        </View>
-                                    )}
-
-                                    {/* Contradicting Features */}
-                                    {refinedAnalysis.contradictingFeatures && refinedAnalysis.contradictingFeatures.length > 0 && (
-                                        <View style={{ marginBottom: 16 }}>
-                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#dc2626', marginBottom: 8 }}>
-                                                ❌ Contradicting Features
-                                            </Text>
-                                            {refinedAnalysis.contradictingFeatures.map((feature: string, index: number) => (
-                                                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                                                    <Text style={{ fontSize: 12, color: '#dc2626', marginRight: 8 }}>•</Text>
-                                                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>{feature}</Text>
-                                                </View>
-                                            ))}
-                                        </View>
-                                    )}
-
-                                    {/* Key Distinguishing Features */}
-                                    {refinedAnalysis.keyDistinguishingFeatures && refinedAnalysis.keyDistinguishingFeatures.length > 0 && (
-                                        <View style={{ marginBottom: 16 }}>
-                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#0ea5e9', marginBottom: 8 }}>
-                                                🔍 Key Distinguishing Features
-                                            </Text>
-                                            {refinedAnalysis.keyDistinguishingFeatures.map((feature: string, index: number) => (
-                                                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                                                    <Text style={{ fontSize: 12, color: '#0ea5e9', marginRight: 8 }}>•</Text>
-                                                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>{feature}</Text>
-                                                </View>
-                                            ))}
-                                        </View>
-                                    )}
-
-                                    {/* Environmental Notes */}
-                                    {refinedAnalysis.environmentalNotes && (
-                                        <View style={{ marginBottom: 16 }}>
-                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#d97706', marginBottom: 8 }}>
-                                                🌱 Environmental Factors
-                                            </Text>
-                                            <Text style={{ fontSize: 13, color: '#6b7280', lineHeight: 18 }}>
-                                                {refinedAnalysis.environmentalNotes}
-                                            </Text>
-                                        </View>
-                                    )}
-
-                                    {/* Similar Species */}
-                                    {refinedAnalysis.similarSpecies && refinedAnalysis.similarSpecies.length > 0 && (
-                                        <View style={{ marginBottom: 16 }}>
-                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#7c3aed', marginBottom: 8 }}>
-                                                🔄 Similar Species to Consider
-                                            </Text>
-                                            {refinedAnalysis.similarSpecies.map((species: string, index: number) => (
-                                                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                                                    <Text style={{ fontSize: 12, color: '#7c3aed', marginRight: 8 }}>•</Text>
-                                                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>{species}</Text>
-                                                </View>
-                                            ))}
-                                        </View>
-                                    )}
-
-                                    {/* Suggestions */}
-                                    {refinedAnalysis.suggestions && refinedAnalysis.suggestions.length > 0 && (
-                                        <View style={{ marginBottom: 16 }}>
-                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#059669', marginBottom: 8 }}>
-                                                💡 Next Steps
-                                            </Text>
-                                            {refinedAnalysis.suggestions.map((suggestion: string, index: number) => (
-                                                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                                                    <Text style={{ fontSize: 12, color: '#059669', marginRight: 8 }}>•</Text>
-                                                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>{suggestion}</Text>
-                                                </View>
-                                            ))}
-                                        </View>
-                                    )}
-                                </ScrollView>
-
-                                {/* Action Buttons */}
-                                <View style={{ gap: 12, marginTop: 16 }}>
-                                    {refinedConfidence >= 70 && (
-                                        <TouchableOpacity
-                                            style={{
-                                                backgroundColor: '#059669',
-                                                padding: 16,
-                                                borderRadius: 8,
-                                                alignItems: 'center'
-                                            }}
-                                            onPress={handleConfirm}
-                                            disabled={savingInteraction}
-                                        >
-                                            {savingInteraction ? (
-                                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                                    <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
-                                                    <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
-                                                        💾 Saving...
-                                                    </Text>
-                                                </View>
-                                            ) : (
-                                                <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
-                                                    ✅ Confirm This Plant
-                                                </Text>
-                                            )}
-                                        </TouchableOpacity>
-                                    )}
-
-                                    <TouchableOpacity
-                                        style={{
-                                            backgroundColor: '#f3f4f6',
-                                            padding: 16,
-                                            borderRadius: 8,
-                                            alignItems: 'center'
-                                        }}
-                                        onPress={() => setShowCustomQuestion(true)}
-                                    >
-                                        <Text style={{ color: '#374151', fontSize: 16, fontWeight: '600' }}>
-                                            🤖 Ask AI for Better Match
-                                        </Text>
-                                    </TouchableOpacity>
-
-                                    <TouchableOpacity
-                                        style={{
-                                            backgroundColor: '#f3f4f6',
-                                            padding: 12,
-                                            borderRadius: 8,
-                                            alignItems: 'center'
-                                        }}
-                                        onPress={() => {
-                                            setShowRefinedResult(false);
-                                            setShowPersonalDescription(false);
-                                        }}
-                                    >
-                                        <Text style={{ color: '#374151', fontSize: 14, fontWeight: '600' }}>
-                                            ← Back to Questions
+                                            🤖 Find a Better Match
                                         </Text>
                                     </TouchableOpacity>
                                 </View>
@@ -720,7 +502,7 @@ export default function PlantConfirmationModal({
                                 backgroundColor: 'white', 
                                 borderRadius: 12, 
                                 padding: 20,
-                                marginTop: 20,
+                                marginTop: 1,
                                 shadowColor: '#000',
                                 shadowOffset: { width: 0, height: 2 },
                                 shadowOpacity: 0.1,
@@ -728,13 +510,14 @@ export default function PlantConfirmationModal({
                                 elevation: 3
                             }}>
                                 <Text style={{ fontSize: 16, fontWeight: '600', color: '#166534', marginBottom: 12 }}>
-                                    🤖 Describe What You See
+                                    🤖 Get Better AI Match
                                 </Text>
                                 <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>
-                                    Tell the AI about specific features you notice that might help identify the plant better.
+                                    We'll use all your answers and observations to find a better match. Add any additional details you noticed.
                                 </Text>
                                 
                                 <TextInput
+                                    ref={textInputRef}
                                     style={{
                                         borderWidth: 1,
                                         borderColor: '#d1d5db',
@@ -744,12 +527,22 @@ export default function PlantConfirmationModal({
                                         color: '#374151',
                                         backgroundColor: '#f9fafb',
                                         minHeight: 80,
-                                        textAlignVertical: 'top'
+                                        textAlignVertical: 'top',
+                                        maxHeight: 120
                                     }}
-                                    placeholder="e.g., The leaves have tiny hairs, the flowers are bright yellow, it grows in clusters..."
+                                    placeholder="e.g., The leaves have tiny hairs, the flowers are bright yellow, it grows in clusters, I noticed it has a strong smell..."
                                     value={customQuestion}
                                     onChangeText={setCustomQuestion}
                                     multiline
+                                    autoFocus={false}
+                                    blurOnSubmit={false}
+                                    returnKeyType="default"
+                                    onFocus={() => {
+                                        // Scroll to the input when it's focused
+                                        setTimeout(() => {
+                                            scrollViewRef.current?.scrollToEnd({ animated: true });
+                                        }, 300);
+                                    }}
                                 />
                                 
                                 <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
@@ -764,9 +557,10 @@ export default function PlantConfirmationModal({
                                         onPress={handleRequestBetter}
                                     >
                                         <Text style={{ color: 'white', fontSize: 14, fontWeight: '600' }}>
-                                            🔍 Find Better Match
+                                            🔍 Find Match
                                         </Text>
                                     </TouchableOpacity>
+                                    
                                     <TouchableOpacity
                                         style={{
                                             flex: 1,

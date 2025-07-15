@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Alert, Clipboard, Modal } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, Alert, Clipboard, Modal, ActivityIndicator } from "react-native";
 import { api } from "../convex/_generated/api";
 import { useAction, useQuery } from "convex/react";
 
@@ -68,6 +68,9 @@ export default function MainScreen() {
     const updatePlantTags = useAction(api.identifyPlant.updatePlantTags);
     const plants = useQuery(api.identifyPlant.getAllPlants);
     const recentPlants = useQuery(api.identifyPlant.getRecentlyIdentified, { limit: 5 });
+
+    // Add the re-extract action
+    
 
     // Location handler
     const { currentLocation, getCurrentLocation, requestLocationPermission } = useLocationHandler();
@@ -640,19 +643,34 @@ Collected with AncesTree 🌿📱`;
             // Determine if this was from multi-photo mode and pass all photos
             const isFromMultiPhoto = currentCapturedPhotos.length > 0;
             
-                        const result = await confirmPlantSelection({
-              selectedSuggestion: {
-                scientificName: selectedSuggestion.scientificName,
-                commonNames: selectedSuggestion.commonNames,
-                description: selectedSuggestion.description,
-                wikiUrl: selectedSuggestion.wikiUrl,
-                imageUrl: selectedSuggestion.imageUrl,
-                similar_images: selectedSuggestion.similar_images, // Pass preview images to save them
-              },
+
+            
+            // Ensure all fields are present with proper defaults
+            const suggestionToSend = {
+              scientificName: selectedSuggestion.scientificName,
+              commonNames: Array.isArray(selectedSuggestion.commonNames) ? selectedSuggestion.commonNames : [],
+              description: selectedSuggestion.description || "",
+              wikiUrl: selectedSuggestion.wikiUrl || "",
+              imageUrl: selectedSuggestion.imageUrl || "",
+              similar_images: Array.isArray(selectedSuggestion.similar_images) ? selectedSuggestion.similar_images : [],
+            };
+            
+
+            
+
+            
+            const result = await confirmPlantSelection({
+              selectedSuggestion: suggestionToSend,
               userPhotoBase64: isFromMultiPhoto ? undefined : currentPhotoBase64, // Use single photo for single-photo mode
               userPhotos: isFromMultiPhoto ? currentCapturedPhotos : undefined, // Use all photos for multi-photo mode
               userFeedback: feedback,
-              location: locationToUse || undefined, // Pass the location data, converting null to undefined
+              location: locationToUse ? {
+                latitude: locationToUse.latitude,
+                longitude: locationToUse.longitude,
+                address: locationToUse.address || "",
+                accuracy: locationToUse.accuracy || 0,
+                timestamp: locationToUse.timestamp || Date.now()
+              } : undefined, // Pass the location data, converting null to undefined
               medicinalDetails: medicinalDetails || undefined, // Pass medicinal details if provided
             });
 
@@ -672,33 +690,56 @@ Collected with AncesTree 🌿📱`;
             
             // Small delay to ensure state is updated, then navigate
             setTimeout(() => {
-                setSelectedPlantId(result.plantId);
+                // Debug log to check the value and type of plantId
+                console.log("DEBUG plantId", result.plantId, typeof result.plantId);
+                // Ensure only the string ID is passed
+                let plantIdToSet = result.plantId;
+                if (typeof plantIdToSet === 'object' && plantIdToSet !== null) {
+                    plantIdToSet = plantIdToSet.plantId || plantIdToSet._id || '';
+                }
+                setSelectedPlantId(plantIdToSet);
                 setCurrentView('detail');
             }, 100);
             
         } catch (err) {
-            console.error("Error confirming plant selection:", err);
             Alert.alert("Error", "Failed to add plant to collection. Please try again.");
             setLoading(false);
         }
     };
 
     // Handler for requesting better AI identification
-    const handleRequestBetterIdentification = async (userDescription: string, rejectedSuggestions: string[]) => {
+    const handleRequestBetterIdentification = async (userDescription: string, rejectedSuggestions: string[], contextAnswers?: Array<{question: string, answer: string}>) => {
         setAiLoading(true); // Use separate AI loading state
         try {
             const result = await requestBetterIdentification({
                 base64: currentPhotoBase64,
                 userDescription,
                 rejectedSuggestions,
+                contextAnswers
             });
 
             console.log("🤖 AI provided alternative suggestions:", result.suggestions.length);
             
             if (result.suggestions && result.suggestions.length > 0) {
-                // Add AI suggestions to the existing list
-                setPlantSuggestions(prev => [...prev, ...result.suggestions]);
-                // Don't show alert during loading - just update the UI
+                // Prioritize AI suggestions at the top of the list
+                setPlantSuggestions(prev => {
+                    // Mark AI suggestions with a special flag
+                    const aiSuggestions = result.suggestions.map(suggestion => ({
+                        ...suggestion,
+                        isAISuggestion: true,
+                        aiPriority: true
+                    }));
+                    
+                    // Add AI suggestions at the top, then existing suggestions
+                    return [...aiSuggestions, ...prev];
+                });
+                
+                // Show a notification that new suggestions were added
+                Alert.alert(
+                    "Better Matches Found!", 
+                    `AI found ${result.suggestions.length} better match(es) based on your detailed description. Check the top of the suggestions list!`,
+                    [{ text: "OK" }]
+                );
             } else {
                 Alert.alert(
                     "No Additional Matches", 
@@ -1026,6 +1067,47 @@ Collected with AncesTree 🌿📱`;
                     </Modal>
                 )}
             </ScrollView>
+
+            {/* Global AI Loading Overlay */}
+            {aiLoading && (
+                <View style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(0,0,0,0.7)',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    zIndex: 9999,
+                }}>
+                    <View style={{
+                        backgroundColor: 'white',
+                        paddingVertical: 24,
+                        paddingHorizontal: 32,
+                        borderRadius: 16,
+                        alignItems: 'center',
+                        width: '85%',
+                        maxWidth: 320,
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 4 },
+                        shadowOpacity: 0.3,
+                        shadowRadius: 8,
+                        elevation: 8,
+                    }}>
+                        <ActivityIndicator size="large" color="#f59e0b" />
+                        <Text style={{ marginTop: 16, fontSize: 16, fontWeight: '700', color: '#92400e', textAlign: 'center' }}>
+                            🤖 AI Analysis in Progress
+                        </Text>
+                        <Text style={{ marginTop: 8, fontSize: 14, color: '#78350f', textAlign: 'center', lineHeight: 20 }}>
+                            Analyzing your photo and description to find better plant matches...
+                        </Text>
+                        <Text style={{ marginTop: 12, fontSize: 12, color: '#a16207', textAlign: 'center', fontStyle: 'italic' }}>
+                            This may take 10-30 seconds
+                        </Text>
+                    </View>
+                </View>
+            )}
         </View>
     );
 }

@@ -77,11 +77,6 @@ export default function PlantIdentificationView({
         console.log('🔍 PlantIdentificationView - selectedLocation changed:', selectedLocation);
     }, [selectedLocation]);
 
-    // Debug: Log when useCurrentLocation changes
-    useEffect(() => {
-        console.log('🔍 PlantIdentificationView - useCurrentLocation changed:', useCurrentLocation);
-    }, [useCurrentLocation]);
-
     // Handler functions
     const handleOpenLocationPicker = () => {
         setShowLocationPicker(true);
@@ -497,7 +492,7 @@ export default function PlantIdentificationView({
                                         textShadowOffset: { width: 1, height: 1 },
                                         textShadowRadius: 2
                                     }}>
-                                        Add Photo ({capturedPhotos.length + 1})
+                                        Add Photo ({capturedPhotos.length})
                                     </Text>
                                 </View>
                             </TouchableOpacity>

@@ -264,7 +264,7 @@ export default function PlantCollectionView({
                         <View style={{
                             backgroundColor: '#f0fdf4',
                             paddingHorizontal: 8,
-                            paddingVertical: 4,
+                            paddingVertical: 1,
                             borderRadius: 6,
                             borderWidth: 1,
                             borderColor: '#bbf7d0'
@@ -277,21 +277,6 @@ export default function PlantCollectionView({
                         </View>
                     )}
                 </View>
-                
-                {selectedTags.length > 0 && (
-                    <View style={{
-                        backgroundColor: '#fef3c7',
-                        padding: 8,
-                        borderRadius: 6,
-                        marginBottom: 8,
-                        borderWidth: 1,
-                        borderColor: '#fcd34d'
-                    }}>
-                        <Text style={{ fontSize: 11, color: '#92400e', textAlign: 'center' }}>
-                            🔍 Showing plants with ALL selected properties (AND filter)
-                        </Text>
-                    </View>
-                )}
                 
                 <ScrollView 
                     horizontal 
@@ -516,136 +501,6 @@ export default function PlantCollectionView({
                                     {plantItem.scientificName}
                                 </Text>
 
-                                {/* Location Preview - Show if any sightings have location data */}
-                                {plantItem.allSightings && plantItem.allSightings.some((s: any) => s.latitude && s.longitude) && (
-                                    <View style={{ marginTop: 8, marginBottom: 8 }}>
-                                        {(() => {
-                                            // Get unique locations from sightings
-                                            const locationsMap = new Map();
-                                            plantItem.allSightings.forEach((sighting: any) => {
-                                                if (sighting.latitude && sighting.longitude) {
-                                                    const key = `${sighting.latitude.toFixed(4)},${sighting.longitude.toFixed(4)}`;
-                                                    if (!locationsMap.has(key)) {
-                                                        locationsMap.set(key, {
-                                                            latitude: sighting.latitude,
-                                                            longitude: sighting.longitude,
-                                                            address: sighting.address,
-                                                            timestamp: sighting.locationTimestamp || sighting.identifiedAt,
-                                                            count: 1
-                                                        });
-                                                    } else {
-                                                        locationsMap.get(key).count++;
-                                                    }
-                                                }
-                                            });
-                                            
-                                            const uniqueLocations = Array.from(locationsMap.values());
-                                            const mostRecentLocation = uniqueLocations.sort((a, b) => b.timestamp - a.timestamp)[0];
-                                            
-                                            return (
-                                                <View>
-                                                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                                                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534' }}>
-                                                            📍 Locations ({uniqueLocations.length})
-                                                        </Text>
-                                                        {uniqueLocations.length > 1 && (
-                                                            <Text style={{ fontSize: 10, color: '#6b7280' }}>
-                                                                Multiple spots found
-                                                            </Text>
-                                                        )}
-                                                    </View>
-                                                    
-                                                    {/* Compact location display */}
-                                                    <TouchableOpacity
-                                                        style={{
-                                                            backgroundColor: '#f0fdf4',
-                                                            padding: 10,
-                                                            borderRadius: 8,
-                                                            borderWidth: 1,
-                                                            borderColor: '#bbf7d0',
-                                                            flexDirection: 'row',
-                                                            alignItems: 'center',
-                                                            gap: 10
-                                                        }}
-                                                        onPress={() => {
-                                                            openInMaps(
-                                                                mostRecentLocation.latitude, 
-                                                                mostRecentLocation.longitude, 
-                                                                plantItem.commonNames?.[0] || plantItem.scientificName
-                                                            );
-                                                        }}
-                                                        activeOpacity={0.7}
-                                                    >
-                                                        {/* Map icon */}
-                                                        <View style={{
-                                                            backgroundColor: '#059669',
-                                                            width: 32,
-                                                            height: 32,
-                                                            borderRadius: 6,
-                                                            justifyContent: 'center',
-                                                            alignItems: 'center'
-                                                        }}>
-                                                            <Text style={{ fontSize: 16 }}>🗺️</Text>
-                                                        </View>
-                                                        
-                                                        {/* Location info */}
-                                                        <View style={{ flex: 1 }}>
-                                                            {mostRecentLocation.address && (
-                                                                <Text style={{ fontSize: 11, color: '#374151', marginBottom: 2 }} numberOfLines={1}>
-                                                                    {mostRecentLocation.address}
-                                                                </Text>
-                                                            )}
-                                                            <Text style={{ fontSize: 10, color: '#6b7280', fontFamily: 'monospace' }}>
-                                                                {formatDecimalCoordinates(mostRecentLocation.latitude, mostRecentLocation.longitude)}
-                                                            </Text>
-                                                            {uniqueLocations.length > 1 && (
-                                                                <Text style={{ fontSize: 9, color: '#059669', fontWeight: '600', marginTop: 2 }}>
-                                                                    +{uniqueLocations.length - 1} more location{uniqueLocations.length > 2 ? 's' : ''}
-                                                                </Text>
-                                                            )}
-                                                        </View>
-                                                        
-                                                        {/* Tap indicator */}
-                                                        <View style={{
-                                                            backgroundColor: '#e5e7eb',
-                                                            paddingHorizontal: 6,
-                                                            paddingVertical: 2,
-                                                            borderRadius: 4
-                                                        }}>
-                                                            <Text style={{ fontSize: 9, color: '#6b7280', fontWeight: '600' }}>
-                                                                TAP
-                                                            </Text>
-                                                        </View>
-                                                    </TouchableOpacity>
-                                                    
-                                                    {uniqueLocations.length > 1 && (
-                                                        <TouchableOpacity
-                                                            style={{
-                                                                marginTop: 6,
-                                                                backgroundColor: '#f8fafc',
-                                                                paddingHorizontal: 8,
-                                                                paddingVertical: 4,
-                                                                borderRadius: 4,
-                                                                alignSelf: 'center',
-                                                                borderWidth: 1,
-                                                                borderColor: '#e2e8f0'
-                                                            }}
-                                                            onPress={() => {
-                                                                setSelectedPlantId(plantItem._id);
-                                                                setCurrentView('detail');
-                                                            }}
-                                                        >
-                                                            <Text style={{ fontSize: 10, color: '#059669', fontWeight: '600' }}>
-                                                                🗺️ View All {uniqueLocations.length} Locations
-                                                            </Text>
-                                                        </TouchableOpacity>
-                                                    )}
-                                                </View>
-                                            );
-                                        })()}
-                                    </View>
-                                )}
-
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
                                     <View style={{ flex: 1 }}>
                                         {plantItem.medicinalTags && plantItem.medicinalTags.length > 0 ? (
@@ -703,11 +558,6 @@ export default function PlantCollectionView({
                                         )}
                                     </View>
                                     <View style={{ alignItems: 'flex-end' }}>
-                                        {plantItem.lastSeen && (
-                                            <Text style={{ fontSize: 10, color: '#9ca3af' }}>
-                                                Last seen {new Date(plantItem.lastSeen).toLocaleDateString()}
-                                            </Text>
-                                        )}
                                         {/* Admin Delete Button */}
                                         {adminMode && (
                                             <TouchableOpacity 

@@ -24,7 +24,8 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses location to tag plants you identify and record where you found them.",
         "NSCameraUsageDescription": "This app uses the camera to take photos of plants for identification.",
         "NSPhotoLibraryUsageDescription": "This app accesses your photo library to select plant photos for identification."
-      }
+      },
+      "bundleIdentifier": "com.anonymous.Ancestree"
     },
     "android": {
       "adaptiveIcon": {
@@ -33,11 +34,12 @@
       },
       "edgeToEdgeEnabled": true,
       "permissions": [
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION",
-        "CAMERA",
-        "WRITE_EXTERNAL_STORAGE",
-        "READ_EXTERNAL_STORAGE"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {

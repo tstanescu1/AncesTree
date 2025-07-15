@@ -20,6 +20,12 @@ export default defineSchema({
     otherDetails: v.optional(v.string()),
     activeCompounds: v.optional(v.array(v.string())),
     pests: v.optional(v.array(v.string())),
+    // New fields for AI-generated medicinal information
+    preparationMethods: v.optional(v.array(v.string())),
+    partsUsed: v.optional(v.array(v.string())),
+    medicinalUses: v.optional(v.array(v.string())),
+    // NEW: Add description field
+    description: v.optional(v.string()),
   }).index("scientificName", ["scientificName"]),
 
   sightings: defineTable({
@@ -39,6 +45,42 @@ export default defineSchema({
     sourceAttribution: v.optional(v.string()),
     userExperience: v.optional(v.string()),
   }).index("plantId", ["plantId"]),
+
+  // NEW: Medicinal observations table for user-contributed observations
+  medicinal_observations: defineTable({
+    plantId: v.id("plants"),
+    scientificName: v.string(),
+    observationTitle: v.string(),
+    observationContent: v.string(),
+    observationType: v.string(), // "personal-experience", "traditional-knowledge", "scientific-research", "anecdotal"
+    medicinalTags: v.array(v.string()), // Tags from user's observation
+    preparationMethods: v.optional(v.array(v.string())),
+    partsUsed: v.optional(v.array(v.string())),
+    dosageNotes: v.optional(v.string()),
+    effectiveness: v.optional(v.number()), // 1-5 rating
+    sideEffects: v.optional(v.string()),
+    contraindications: v.optional(v.string()),
+    sourceAttribution: v.optional(v.string()), // "personal", "traditional", "research", etc.
+    location: v.optional(v.object({
+      latitude: v.number(),
+      longitude: v.number(),
+      address: v.string(),
+      accuracy: v.number(),
+      timestamp: v.number()
+    })),
+    season: v.optional(v.string()), // When the observation was made
+    weather: v.optional(v.string()), // Weather conditions during observation
+    plantCondition: v.optional(v.string()), // "fresh", "dried", "flowering", "fruiting", etc.
+    timestamp: v.number(),
+    isVerified: v.optional(v.boolean()), // For community verification
+    verifiedBy: v.optional(v.array(v.string())), // Array of user IDs who verified
+    upvotes: v.optional(v.number()),
+    downvotes: v.optional(v.number()),
+  })
+  .index("plantId", ["plantId"])
+  .index("scientificName", ["scientificName"])
+  .index("observationType", ["observationType"])
+  .index("timestamp", ["timestamp"]),
 
   plant_feedback: defineTable({
     plantId: v.id("plants"),
